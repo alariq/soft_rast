@@ -2391,10 +2391,10 @@ void init_scene(TriBuffer& tb, VertexBuffer2D& dyn_vb, m44 mproj) {
     g_meshes.vb.push(quad_scale*vec4( 1*g_s, -0.95f, -1*g_s, 1) + quad_pos);
     g_meshes.vb.push(quad_scale*vec4( 1*g_s, -0.95f, 1*g_s, 1) + quad_pos);
 #else
-    g_meshes.vb.push(quad_scale*vec4(-1*g_s, -0.95f, -2*g_s, 1) + quad_pos);
-    g_meshes.vb.push(quad_scale*vec4(-1*g_s, 0.95f, -1.5*g_s, 1) + quad_pos);
-    g_meshes.vb.push(quad_scale*vec4( 1*g_s, 0.95f, -1.5*g_s, 1) + quad_pos);
-    g_meshes.vb.push(quad_scale*vec4( 1*g_s, -0.95f, -1*g_s, 1) + quad_pos);
+    g_meshes.vb.push(quad_scale*vec4(-1*g_s, -0.95f, -2*g_s, 0) + quad_pos);
+    g_meshes.vb.push(quad_scale*vec4(-1*g_s, 0.95f, -1.5*g_s, 0) + quad_pos);
+    g_meshes.vb.push(quad_scale*vec4( 1*g_s, 0.95f, -1.5*g_s, 0) + quad_pos);
+    g_meshes.vb.push(quad_scale*vec4( 1*g_s, -0.95f, -1*g_s, 0) + quad_pos);
 #endif
     const int quad_vb_count = (int)g_meshes.vb.size() - quad_vb_offset;
 
