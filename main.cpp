@@ -1810,6 +1810,7 @@ int g_active_triangle = 0;
 vec4 g_uvw_under_cursor;
 struct PixInfo {
     D z;
+    float hw;
     vec4 attr[ATT_COUNT];
 
 };
@@ -1951,11 +1952,18 @@ void renderPixel(int x, int y, float u, float v, float w, const TriSetup<FP16>& 
         z = interpolate(ts.hz[0], ts.hz[1], ts.hz[2], u, v, w) * oohw;
     }
 
+    // alternative way to calc clip space z
+    //float far = 0.5f, near = 10;
+    //float zview = -hw;
+    //float oo_zview = -oohw;
+    //z = ((zview)*-(far + near)/(far - near) -2*far*near/(far - near))*(oo_zview);
+
     if((int)g_sel_pix_x == x && (int)g_sel_pix_y == y) {
         g_pix_info_under_cursor.attr[ATT_COLOR] = color;
         g_pix_info_under_cursor.attr[ATT_TEXCOORD] = texcoord;
         g_pix_info_under_cursor.attr[ATT_NORMAL] = normal;
         g_pix_info_under_cursor.z = z;
+        g_pix_info_under_cursor.hw = hw;
     }
 
     if(g_b_depth_test_enable) {
@@ -3639,7 +3647,7 @@ void on_update() {
                     ImGui::Text("R:%d G:%d B:%d A:%d", color&0xFF, (color>>8)&0xFF, (color>>16)&0xFF, (color>>24)&0xFF);
                     ImGui::SameLine();
                     ImGui::Text("U:%.3f V:%.3f W:%.3f", g_uvw_under_cursor.x, g_uvw_under_cursor.y, g_uvw_under_cursor.z);
-                    ImGui::Text("Depth:%f", g_pix_info_under_cursor.z);
+                    ImGui::Text("Depth:%f hw(-zview):%f", g_pix_info_under_cursor.z, g_pix_info_under_cursor.hw);
                     for(int i=0; i<ATT_COUNT; i++) {
                         ImGui::Text("Attr%d: %.3f %.3f %.3f %.3f", i, g_pix_info_under_cursor.attr[i].x, g_pix_info_under_cursor.attr[i].y,
                                 g_pix_info_under_cursor.attr[i].z, g_pix_info_under_cursor.attr[i].w);
