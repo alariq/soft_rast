@@ -2858,6 +2858,8 @@ Image* make_some_noise(int w, int h) {
     img->width = w;
     img->height =h;
     img->data = (Image::Pixel*)malloc(w*h*sizeof(Image::Pixel));
+    img->filename_.len = 0;
+    img->filename_.data = nullptr;
 
     for(int y = 0; y < h; y++) {
         for(int x = 0; x < w; x++) {
@@ -4167,7 +4169,7 @@ void draw_object_info(ObjList& ol) {
                 tex_dl = make_dir_list(tex_base_dir, "tga");
             }
             ImGui::SameLine();
-            ImGui::TextUnformatted(o.texture_ ? o.texture_->filename_.data : "<NULL>");
+            ImGui::TextUnformatted((o.texture_ && o.texture_->filename_.data) ? o.texture_->filename_.data : "<NULL>");
 
             if (ImGui::BeginPopup("select_texture")) {
                 ImGui::SeparatorText("Texures");
