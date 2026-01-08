@@ -1868,8 +1868,8 @@ int clip_triangle(const u8 mask, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[AT
             trivec4 a[ATT_COUNT] = {ia[ATT_COUNT*i + 0], ia[ATT_COUNT*i + 1] };
 
             flags = v0[0] < -v0.w ? 1 : 0;
-            flags += v1[0] < -v1.w < -1 ? 2 : 0;
-            flags += v2[0] < -v2.w < -1 ? 4 : 0;
+            flags += v1[0] < -v1.w ? 2 : 0;
+            flags += v2[0] < -v2.w ? 4 : 0;
 
             assert(o_size > 2);
             ocount += clip_plane<0, -1>(flags, v0, v1, v2, a, ot + ocount, oa + ATT_COUNT*ocount);
