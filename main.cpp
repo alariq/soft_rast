@@ -1103,8 +1103,6 @@ ObjModel* parse_obj(const char* data) {
     c.tail = { arena, size };
     c.b_ok = true;
 
-
-
     int line = 0;
     while(c.b_ok) {
         c = cut(c.tail, '\n');
@@ -1716,6 +1714,102 @@ int clip_plane(u8 flags, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[ATT_COUNT]
     }
 }
 
+#define MAX_CLIP_TRI 64
+
+// super nice doc, real joy
+// On-Line Computer Graphics Notes CLIPPING by Kenneth Joy
+// https://fabiensanglard.net/polygon_codec/clippingdocument/Clipping.pdf
+// TODO: rewrite my awful clip_plane according to this paper as well
+int clip_w(vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[ATT_COUNT], trivec4* tris,  trivec4* o_attr) {
+
+    const float W = 0.0001f; // to avoid div by 0
+
+    u8 flags = v0.w < W ? 1 : 0;
+    flags += v1.w < W ? 2 : 0;
+    flags += v2.w < W ? 4 : 0;
+
+    int ntri = 0;
+    switch (flags) {
+    case 0:
+        tris[ntri] = { v0, v1, v2 };
+        o_attr[ntri*ATT_COUNT + 0] = i_attr[0];
+        o_attr[ntri*ATT_COUNT + 1] = i_attr[1];
+        return 1;
+    case 7:
+        return 0;
+    // permute triangle vertices to one of two canonical forms:
+    // 1. Just v2 outside of clipping volume (flag == 4)
+    // 2. v1 and v2 outside of clippling volume (flag == 6)
+    case 1:
+        flags = 4;
+    case 5:
+        rotate_left(v0, v1, v2);
+        rotate_left(i_attr[0].v0, i_attr[0].v1, i_attr[0].v2);
+        rotate_left(i_attr[1].v0, i_attr[1].v1, i_attr[1].v2);
+        break;
+    case 2:
+        flags = 4;
+    case 3:
+        rotate_right(v0, v1, v2);
+        rotate_right(i_attr[0].v0, i_attr[0].v1, i_attr[0].v2);
+        rotate_right(i_attr[1].v0, i_attr[1].v1, i_attr[1].v2);
+        break;
+    }
+
+    if (flags == 4) { // hither clipping yields 2 triangles
+
+        const float t12 = (W - v1.w)/(v2.w - v1.w);
+        assert(!isnan(t12));
+        const vec4 v12 = lerp(v1, v2, t12);
+
+        vec4 a0v12 = lerp(i_attr[0].v1, i_attr[0].v2, t12);
+        vec4 a1v12 = lerp(i_attr[1].v1, i_attr[1].v2, t12);
+
+        assert(!isnan(v12.x) && !isnan(v12.y) && !isnan(v12.z) && !isnan(v12.w));
+
+        tris[ntri] = { v0, v1, v12 };
+        o_attr[ntri*ATT_COUNT + 0] = {i_attr[0].v0, i_attr[0].v1, a0v12};
+        o_attr[ntri*ATT_COUNT + 1] = {i_attr[1].v0, i_attr[1].v1, a1v12};
+        ntri++;
+
+        const float t02 = (W - v0.w)/(v2.w - v0.w);
+        assert(!isnan(t02));
+        const vec4 v02 = lerp(v0, v2, t02);
+
+        vec4 a0v02 = lerp(i_attr[0].v0, i_attr[0].v2, t02);
+        vec4 a1v02 = lerp(i_attr[1].v0, i_attr[1].v2, t02);
+
+        tris[ntri] = { v0, v12, v02 };
+        o_attr[ntri*ATT_COUNT + 0] = {i_attr[0].v0, a0v12, a0v02};
+        o_attr[ntri*ATT_COUNT + 1] = {i_attr[1].v0, a1v12, a1v02};
+
+        return 2;
+
+
+    } else { // hither clipping yields one triangle
+
+        const float t01 = (W - v0.w)/(v1.w - v0.w);
+        const vec4 v01 = lerp(v0, v1, t01);
+
+        const float t02 = (W - v0.w)/(v2.w - v0.w);
+        const vec4 v02 = lerp(v0, v2, t02);
+        assert(!isnan(v02.x) && !isnan(v02.y) && !isnan(v02.z) && !isnan(v02.w));
+
+        tris[ntri] = { v0, v01, v02 };
+
+        vec4 a0v01 = lerp(i_attr[0].v0, i_attr[0].v1, t01);
+        vec4 a1v01 = lerp(i_attr[1].v0, i_attr[1].v1, t01);
+
+        vec4 a0v02 = lerp(i_attr[0].v0, i_attr[0].v2, t02);
+        vec4 a1v02 = lerp(i_attr[1].v0, i_attr[1].v2, t02);
+
+        o_attr[ntri*ATT_COUNT + 0] = {i_attr[0].v0, a0v01, a0v02};
+        o_attr[ntri*ATT_COUNT + 1] = {i_attr[1].v0, a1v01, a1v02};
+
+        return 1;
+    }
+}
+
 // worst case is actually 64! triangles if it is clipped by all planes
 //int clip_triangle(vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[ATT_COUNT], trivec4* o_tris,  trivec4 (& o_attr)[2][12]) {
 int clip_triangle(const u8 mask, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[ATT_COUNT], trivec4* o_tris,  trivec4* o_attr, const int o_size) {
@@ -1723,27 +1817,68 @@ int clip_triangle(const u8 mask, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[AT
     //int ntri = 0;
     u8 flags = 0;
 
-    trivec4 itri[12];
-    trivec4 iattr[2*12];
+    trivec4 itri[MAX_CLIP_TRI];
+    trivec4 iattr[2*MAX_CLIP_TRI];
     int icount = 0;
 
-    trivec4 otri[12];
-    trivec4 oattr[ATT_COUNT*12];
+    trivec4 otri[MAX_CLIP_TRI];
+    trivec4 oattr[ATT_COUNT*MAX_CLIP_TRI];
 
     trivec4* it = itri, *ia = iattr, *ot = otri, *oa = oattr;
 
-    // -x
-    flags = v0[0] < -v0.w ? 1 : 0;
-    flags += v1[0] < -v1.w ? 2 : 0;
-    flags += v2[0] < -v2.w ? 4 : 0;
-    flags = (mask & 0x1) ? flags : 0;
-    assert(o_size > 2);
-    icount += clip_plane<0, -1>(flags, v0, v1, v2, i_attr, it, ia);
+    const float z_near = 0.5f; // TODO:
+    if(v0.w < z_near && v1.w < z_near && v2.w < z_near)
+        return 0;
+
+    // to make all calls same
+    icount = 1;
+    it[0] = { v0, v1, v2 };
+    for(int i=0;i<ATT_COUNT;++i) {
+        ia[i] = i_attr[i];
+    }
+    int ocount = 0;
+
+    if(mask & 0x40) {
+        ocount = 0;
+        for(int i=0;i<icount; ++i) {
+            v0 = it[i].v0;
+            v1 = it[i].v1;
+            v2 = it[i].v2;
+            trivec4 a[ATT_COUNT] = {ia[ATT_COUNT*i + 0], ia[ATT_COUNT*i + 1] };
+
+            assert(o_size > 2);
+            ocount += clip_w(v0, v1, v2, a, ot + ocount, oa + ATT_COUNT*ocount);
+        }
+        swap(ia, oa);
+        swap(it, ot);
+        swap(icount, ocount);
+    }
 
     // can use something like index buffer, so that we only do interpolation of attributes once at the end if triangle is clipped by multiple planes,
     // or does it matter in this case?
 
-    int ocount = 0;
+    // -x
+    if(mask&0x1) {
+        ocount = 0;
+        for(int i=0;i<icount; ++i) {
+
+            v0 = it[i].v0;
+            v1 = it[i].v1;
+            v2 = it[i].v2;
+            trivec4 a[ATT_COUNT] = {ia[ATT_COUNT*i + 0], ia[ATT_COUNT*i + 1] };
+
+            flags = v0[0] < -v0.w ? 1 : 0;
+            flags += v1[0] < -v1.w < -1 ? 2 : 0;
+            flags += v2[0] < -v2.w < -1 ? 4 : 0;
+
+            assert(o_size > 2);
+            ocount += clip_plane<0, -1>(flags, v0, v1, v2, a, ot + ocount, oa + ATT_COUNT*ocount);
+        }
+
+        swap(ia, oa);
+        swap(it, ot);
+        swap(icount, ocount);
+    }
 
     // +x
     if(mask&0x2) {
@@ -1789,7 +1924,6 @@ int clip_triangle(const u8 mask, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[AT
         swap(icount, ocount);
     }
 
-#if 1
     // +y
     if(mask&0x8) {
         ocount = 0;
@@ -1811,7 +1945,6 @@ int clip_triangle(const u8 mask, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[AT
         swap(it, ot);
         swap(icount, ocount);
     }
-#endif
 
     // -z
     if(mask&0x10) {
@@ -1857,7 +1990,7 @@ int clip_triangle(const u8 mask, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[AT
         swap(icount, ocount);
     }
 
-    assert(icount <= 12);
+    assert(icount <= MAX_CLIP_TRI);
     for(int ti=0;ti<icount;++ti) {
         o_tris[ti] = { it[ti].v0, it[ti].v1, it[ti].v2 };
         o_attr[ATT_COUNT*ti + 0] = ia[ATT_COUNT*ti + 0];
@@ -2551,9 +2684,8 @@ void init_scene(TriBuffer& tb, VertexBuffer2D& dyn_vb, m44 mproj) {
             //g_proj_params.near, g_proj_params.far);
 
     // 2 attributes to interpolate, each plane can create 2 triangles out of 1, so max produced tris is 2^6
-    constexpr const int MAX_CLIPPED_TRI = 16;
-    trivec4 o_tri[MAX_CLIPPED_TRI];
-    trivec4 o_attr[MAX_CLIPPED_TRI*ATT_COUNT]; 
+    trivec4 o_tri[MAX_CLIP_TRI];
+    trivec4 o_attr[MAX_CLIP_TRI*ATT_COUNT]; 
 
     // add triangles from mesh
     {
@@ -2581,8 +2713,8 @@ void init_scene(TriBuffer& tb, VertexBuffer2D& dyn_vb, m44 mproj) {
             };
 
             if(g_b_clip) {
-                const int ntris = clip_triangle((u8)g_clip_mask, v0p, v1p, v2p, attribs, o_tri, o_attr, MAX_CLIPPED_TRI);
-                assert(ntris < MAX_CLIPPED_TRI);
+                const int ntris = clip_triangle((u8)g_clip_mask, v0p, v1p, v2p, attribs, o_tri, o_attr, MAX_CLIP_TRI);
+                assert(ntris < MAX_CLIP_TRI);
                 for(int i=0;i<ntris; ++i) {
                     tb.push(TriSetup<S>(o_tri[i].v0, o_tri[i].v1, o_tri[i].v2));
                     for(int ai = 0; ai < ATT_COUNT; ai++) {
@@ -2698,8 +2830,8 @@ void init_scene(TriBuffer& tb, VertexBuffer2D& dyn_vb, m44 mproj) {
 
 
             if(g_b_clip) {
-                const int ntris = clip_triangle((u8)g_clip_mask, v0p, v1p, v2p, attribs, o_tri, o_attr, MAX_CLIPPED_TRI);
-                assert(ntris < MAX_CLIPPED_TRI);
+                const int ntris = clip_triangle((u8)g_clip_mask, v0p, v1p, v2p, attribs, o_tri, o_attr, MAX_CLIP_TRI);
+                assert(ntris < MAX_CLIP_TRI);
                 for(int i=0;i<ntris; ++i) {
                     tb.push(TriSetup<S>(o_tri[i].v0, o_tri[i].v1, o_tri[i].v2));
                     for(int ai = 0; ai < ATT_COUNT; ai++) {
@@ -3694,6 +3826,7 @@ void on_update() {
                     ImGui::CheckboxFlags("+y", &g_clip_mask, 0x8);ImGui::SameLine();
                     ImGui::CheckboxFlags("-z", &g_clip_mask, 0x10);ImGui::SameLine();
                     ImGui::CheckboxFlags("+z", &g_clip_mask, 0x20);
+                    ImGui::CheckboxFlags("w", &g_clip_mask, 0x40);
                 }
 
                 ImGui::SeparatorText("Debug Draw:");
