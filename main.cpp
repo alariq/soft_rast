@@ -24,6 +24,7 @@
 #include "imgui.h"
 #include "fb.h"
 
+#define eps 1e-8f
 
 #define ARRSIZE(x) (sizeof(x)/sizeof(x[0]))
 #define ARRSIZEi(x) ((int)(sizeof(x)/sizeof(x[0])))
@@ -63,7 +64,9 @@ template<typename T> T inline max(const T& a, const T& b) {
     return a > b ? a : b;
 }
 template<typename T> T inline lerp(const T& a, const T& b, const T& v) {
-    return a + (b - a)*v;
+    //return a + (b - a)*v;
+    // better precision if b and a are very different( e.g. 1e+8f - 2 = 1e+8f)
+    return a*(1 - v) + b*v;
 }
 
 template<typename T> T inline clamp(const T& a, const T& vmin, const T& vmax) {
@@ -127,6 +130,10 @@ float dot(const vec2& a, const vec2& b) {
     return a.x*b.x + a.y*b.y;
 }
 
+float len(const vec2& v) {
+    return sqrtf(dot(v, v));
+}
+
 vec2 lerp(const vec2& a, const vec2& b, float v) {
     return vec2(lerp(a.x, b.x, v), lerp(a.y, b.y, v));
 }
@@ -169,6 +176,19 @@ float dot(const vec3& a, const vec3& b) {
     return a.x*b.x + a.y*b.y + a.z*b.z;
 }
 
+vec3 cross(const vec3& a, const vec3& b) {
+    return vec3(a.y*b.z - a.z*b.y, a.z*b.x - a.x*b.z, a.x*b.y - a.y*b.x);
+}
+
+float len(const vec3& v) {
+    return sqrtf(dot(v, v));
+}
+
+vec3 normalize(const vec3& v) {
+    float len_sq = dot(v, v);
+    assert(len_sq > eps);
+    return (1.0f/sqrtf(len_sq)) * v;
+}
 
 struct vec4 {
     vec4(float xx, float yy, float zz, float ww):x(xx), y(yy), z(zz), w(ww) {}
@@ -203,18 +223,22 @@ vec4 operator*(const vec4& v, float x) {
 vec4 operator*(float x, const vec4& v) {
     return vec4(v.x*x, v.y*x, v.z*x, v.w*x);
 }
+vec4 operator*(const vec4& a, const vec4& b) {
+    return vec4(a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w);
+}
+
 vec4 operator+(const vec4& a, const vec4& b) {
     return vec4(a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w);
 }
 vec4 operator-(const vec4& a, const vec4& b) {
     return vec4(a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w);
 }
-vec4 operator*(const vec4& a, const vec4& b) {
-    return vec4(a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w);
-}
-
 float dot(const vec4& a, const vec4& b) {
     return a.x*b.x + a.y*b.y + a.z*b.z + a.w*b.w;
+}
+
+float len(const vec4& v) {
+    return sqrtf(dot(v, v));
 }
 
 vec4 lerp(const vec4& a, const vec4 b, float t) {
@@ -223,8 +247,8 @@ vec4 lerp(const vec4& a, const vec4 b, float t) {
 
 vec4 normalize(const vec4& v) {
     float len_sq = dot(v, v);
-    assert(len_sq > 1e-8);
-    return (1.0f/len_sq) * v;
+    assert(len_sq > eps);
+    return (1.0f/sqrtf(len_sq)) * v;
 }
 
 vec4 floor(const vec4& v) {
@@ -261,10 +285,13 @@ struct m44 {
         return *this;
     }
 
-    m44& operator=(m44& o) {
+    m44& operator=(const m44& o) {
         memcpy(m, o.m, sizeof(m));
         return *this;
     }
+
+    float operator[](int i) const { assert(i>=0 && i < 16); return m[i]; }
+    float& operator[](int i) { assert(i>=0 && i < 16); return m[i]; }
 
     vec4 col(int i) const { return vec4(m[i], m[i + 4], m[i + 8], m[i + 12]); }
 };
@@ -303,6 +330,24 @@ m44 mul(const m44& a, const m44 b) {
     return m;
 }
 
+m44 translation(const vec3& t) {
+    m44 r = m44::identity();
+    r.r[0][3] = t.x;
+    r.r[1][3] = t.y;
+    r.r[2][3] = t.z;
+    r.r[3][3] = 1.0f;
+    return r;
+}
+
+m44 transpose(const m44& m) {
+    m44 r;
+    r.r[0] = m.col(0);
+    r.r[1] = m.col(1);
+    r.r[2] = m.col(2);
+    r.r[3] = m.col(3);
+    return r;
+}
+
 m44 rotateXZ(const float angle_rad) {
     float c,s;
     sincosf(angle_rad, &s, &c);
@@ -325,6 +370,32 @@ m44 rotateXYZ(float roll, float pitch, float yaw) {
     m.r[1] = { cy*sz, sx*sy*sz + cx*cz, cx*sy*sz - sx*cz, 0};
     m.r[2] = {-sy,    sx*cy,            cx*cy, 0};
     m.r[3] = { 0, 0, 0, 1};
+    return m;
+}
+
+m44 mat_from_quat(const vec4 q) {
+    m44 m;
+
+    m.r[0][0] = 1.0f - 2.0f * (q[1] * q[1] + q[2] * q[2]);
+    m.r[0][1] = 2.0f * (q[0] * q[1] - q[2] * q[3]);
+    m.r[0][2] = 2.0f * (q[2] * q[0] + q[1] * q[3]);
+    m.r[0][3] = 0.0f;
+
+    m.r[1][0] = 2.0f * (q[0] * q[1] + q[2] * q[3]);
+    m.r[1][1]= 1.0f - 2.0f * (q[2] * q[2] + q[0] * q[0]);
+    m.r[1][2] = 2.0f * (q[1] * q[2] - q[0] * q[3]);
+    m.r[1][3] = 0.0f;
+
+    m.r[2][0] = 2.0f * (q[2] * q[0] - q[1] * q[3]);
+    m.r[2][1] = 2.0f * (q[1] * q[2] + q[0] * q[3]);
+    m.r[2][2] = 1.0f - 2.0f * (q[1] * q[1] + q[0] * q[0]);
+    m.r[2][3] = 0.0f;
+
+    m.r[3][0] = 0.0f;
+    m.r[3][1] = 0.0f;
+    m.r[3][2] = 0.0f;
+    m.r[3][3] = 1.0f;
+
     return m;
 }
 
@@ -366,6 +437,48 @@ m44 make_frustum(float fov_y_deg, float aspect_w_by_h, float near, float far) {
 #endif
 }
 
+// takes advantage knowing that it is a view matrix (normalized rotation + translation parts)
+m44 view_invert(const m44& v) {
+    m44 t;
+    t.r[0] = vec4(v.col(0).xyz(), -v[3]);
+    t.r[1] = vec4(v.col(1).xyz(), -v[7]);
+    t.r[2] = vec4(v.col(2).xyz(), -v[11]);
+    t.r[3] = vec4(0,0,0,1);
+    return t;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+m44 make_lookat(const vec3& eye, const vec3& target, const vec3& up_dir)
+{
+    // -z direction because right handed coord system
+    vec3 fwd = normalize(eye - target);
+
+    vec3 left = cross(up_dir, fwd);
+    left = normalize(left);
+
+    // recompute the orthonormal up vector
+    vec3 up = cross(fwd, left);
+
+    m44 m = m44::identity();
+
+    // set rotation part, inverse rotation matrix: M^-1 = M^T for Euclidean transform
+    m[0] = left.x;
+    m[1] = left.y;
+    m[2] = left.z;
+    m[4] = up.x;
+    m[5] = up.y;
+    m[6] = up.z;
+    m[8] = fwd.x;
+    m[9] = fwd.y;
+    m[10]= fwd.z;
+
+    // set translation part
+    m[3]= -dot(left, eye);
+    m[7]= -dot(up, eye);
+    m[11]= -dot(fwd, eye);
+
+    return m;
+}
 
 
 typedef uint8_t u8;
@@ -3011,7 +3124,6 @@ void traverse_aabb(const float sample_offset, TriSetup<S>* tris, int count) {
                         v = vpp;
                         w = wpp;
                     }
-                    const float eps = 1e-8;(void)eps;
                     assert(u+v+w <=1+eps && u+v+w>=0);
                     if((int)g_sel_pix_x == px && (int)g_sel_pix_y == py) {
                         g_uvw_under_cursor = vec4(u, v, w);
@@ -3248,7 +3360,6 @@ void traverse_zigzag(const float sample_offset, TriSetup<S>* tris, int count) {
                         v = vpp;
                         w = wpp;
                     }
-                    const float eps = 1e-8;(void)eps;
                     assert(u+v+w <=1+eps && u+v+w>=0);
                     if((int)g_sel_pix_x == px && (int)g_sel_pix_y == py) {
                         g_uvw_under_cursor = vec4(u, v, w);
