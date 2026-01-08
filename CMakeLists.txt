@@ -47,6 +47,12 @@ list(APPEND INC ${APP_INC})
 add_compile_options(-Wall -faligned-new -Werror -Wfatal-errors) # -pedantic
 add_compile_options(-Wno-gnu-anonymous-struct)
 add_compile_options(-Wno-nested-anon-types)
+
+option(WITH_ASAN "Enable address sanitizer" TRUE)
+if(${WITH_ASAN})
+    add_compile_options(-fsanitize=address -static-libasan)
+    set(ASAN_LIB asan)
+endif()
 #add_compile_options(-finstrument-functions)
 set (CMAKE_CXX_STANDARD 14)
 
@@ -61,7 +67,8 @@ pkg_check_modules(FFTW REQUIRED fftw3f)
 find_library(hackrf REQUIRED NAMES hackrf)
 
 add_executable(soft_rast ${SRC} ${INC})
-target_link_libraries(soft_rast PRIVATE pthread hackrf fftw3f SDL3::SDL3 ${OPENG_LIB} ${GLEW_LIBRARIES})
+# asan should be linked first
+target_link_libraries(soft_rast PRIVATE ${ASAN_LIB} pthread hackrf fftw3f SDL3::SDL3 ${OPENG_LIB} ${GLEW_LIBRARIES} )
 
 install(TARGETS soft_rast DESTINATION "${INSTALL_PREFIX}opt/bin")
 
