@@ -3084,6 +3084,29 @@ struct {
 } g_stats;
 
 void on_init() {
+    bool b_test_fixed_point_snapping_causes_very_thin_triangles_to_flip_side = false;
+    if(b_test_fixed_point_snapping_causes_very_thin_triangles_to_flip_side) {
+
+        Pt<float> v0f(90.318260f, 178.040451f);
+        Pt<float> v1f(212.846146f,169.207764f);
+        Pt<float> v2f(223.862900f,168.413589f);
+        float A2f = edge(v0f, v1f, v2f);
+
+        //Pt<FP16> v0(1444, 2848); // 90.250, 178.000
+        //Pt<FP16> v1(3408, 2708); // 213.000, 169.250
+        //Pt<FP16> v2(3584, 2696); // 224.000, 168.500
+        Pt<FP16> v0(toFixed(v0f.x), toFixed(v0f.y)); // 90.250, 178.000
+        Pt<FP16> v1(toFixed(v1f.x), toFixed(v1f.y)); // 213.000, 169.250
+        Pt<FP16> v2(toFixed(v2f.x), toFixed(v2f.y)); // 224.000, 168.500
+
+        Pt<float> v0fp = fromFixed(v0);
+        Pt<float> v1fp = fromFixed(v1);
+        Pt<float> v2fp = fromFixed(v2);
+        float A2 = edge(v0fp, v1fp, v2fp);
+
+        printf("FP 2Area (inv) = %.2f (%.2f) float 2Area (inv) = %.2f (%.2f)\n", A2, 1.0f/A2, A2f, 1.0f/A2f);
+
+    }
 
     if(!g_stats.init()) {
         printf("Stats init failed, results may be incorrect\n");
