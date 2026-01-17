@@ -2278,13 +2278,12 @@ void renderPixel(int x, int y, float u, float v, float w, const TriSetup<FP16>& 
     vec4 texcoord;
 
     //const float oohw = interpolate(ts.ooHw[0], ts.ooHw[1], ts.ooHw[2], u, v, w);
-    const float hw = 1.0f/oohw;
     if(g_b_persp_corr && !g_b_persp_corr_2nd_way) {
         color = hw * interpolate(ts.oo_attribs[ATT_COLOR][0], ts.oo_attribs[ATT_COLOR][1], ts.oo_attribs[ATT_COLOR][2], u, v, w);
         if(!g_b_uv_override) {
             texcoord = hw * interpolate(ts.oo_attribs[ATT_TEXCOORD][0], ts.oo_attribs[ATT_TEXCOORD][1], ts.oo_attribs[ATT_TEXCOORD][2], u, v, w);
         } else {
-            texcoord = uv_override;
+            texcoord = att_override[ATT_TEXCOORD];
         }
         normal = hw * interpolate(ts.oo_attribs[ATT_NORMAL][0], ts.oo_attribs[ATT_NORMAL][1], ts.oo_attribs[ATT_NORMAL][2], u, v, w);
         z = interpolate(ts.hz_pc[0], ts.hz_pc[1], ts.hz_pc[2], u, v, w); // no need to divide by "oohw" as clip space is what we need ;
@@ -2357,8 +2356,9 @@ void plotLine(int x0, int y0, int x1, int y1, u32 color) {
     int error = dx + dy;
     
     TriSetup<FP16> dummy = TriSetup<FP16>(vec4(0), vec4(0), vec4(0));
+    vec4 dummy_att[ATT_COUNT] = {vec4(0.0f)};
     while(true) {
-        renderPixel(x0, y0, 0, 0, 0, dummy, color, vec4(0), 1);
+        renderPixel(x0, y0, 0, 0, 0, dummy, color, dummy_att, 1, 1);
         int e2 = 2 * error;
         if (e2 >= dy) {
             if (x0 == x1) break;
@@ -3406,7 +3406,12 @@ void traverse_aabb(const float sample_offset, TriSetup<S>* tris, int count) {
                     }
 
                     const uint64_t rs = rdtsc();
-                    renderPixel(px, py, u, v, w, ts, b_is_active_tri ? g_tri_color|0xf0000000 : g_tri_color /*0xAA55AA55*/, (1.0f/ooZ)*uv, ooZ);
+                    float z = 1.0f/ooZ;
+                    vec4 att[ATT_COUNT];
+                    att[ATT_TEXCOORD] = uv*z;
+                    att[ATT_COLOR] = vec4(0);
+                    att[ATT_NORMAL] = vec4(0);
+                    renderPixel(px, py, u, v, w, ts, b_is_active_tri ? g_tri_color|0xf0000000 : g_tri_color /*0xAA55AA55*/, att, z, ooZ);
                     g_stats.render += rdtsc() - rs;
                 }
 
@@ -3642,7 +3647,8 @@ void traverse_zigzag(const float sample_offset, TriSetup<S>* tris, int count) {
                     }
 
                     bool b_is_active_tri = g_active_triangle <= (int)g_tris.size() && g_active_triangle >= 0 && &g_tris[g_active_triangle] == tris + i;
-                    renderPixel(px, py, u, v, w, ts, b_is_active_tri ? g_tri_color|0xf0000000 : g_tri_color /*0xAA55AA55*/, vec4(0), 1);           
+                    vec4 dummy_att[ATT_COUNT] = {vec4(0)};
+                    renderPixel(px, py, u, v, w, ts, b_is_active_tri ? g_tri_color|0xf0000000 : g_tri_color /*0xAA55AA55*/, dummy_att, 1, 1);           
                 }
             }
 
