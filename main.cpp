@@ -191,6 +191,10 @@ vec3 normalize(const vec3& v) {
     return (1.0f/sqrtf(len_sq)) * v;
 }
 
+vec3 gamma(vec3 v, float g) {
+    return vec3(pow(v.x, g), pow(v.y, g), pow(v.z, g));
+}
+
 struct vec4 {
     vec4(float xx, float yy, float zz, float ww):x(xx), y(yy), z(zz), w(ww) {}
     vec4(float xx, float yy, float zz):x(xx), y(yy), z(zz), w(0) {}
@@ -2138,6 +2142,13 @@ bool g_b_depth_write_enable = false;
 bool g_b_depth_test_enable = false;
 int g_num_z_fail = 0;
 
+vec3 g_light_dir = vec3(0.14f, -0.95f, -0.27f);
+vec3 g_light_colour = vec3(1);
+float g_light_strength = 1.35f;
+vec3 g_ambient = vec3(0.078f);
+float g_wrapped_diffuse_k = 0.1f;
+float g_gamma = 1;
+
 eTraverseType g_traverse_type = kTraverseAABB;
 int g_shading_view_mode = eShadingViewMode::kColor;
 u8 g_alpha = 0x55;
@@ -2315,7 +2326,10 @@ void renderPixel(int x, int y, float u, float v, float w, const TriSetup<FP16>& 
         }
     }
 
-    const vec3 light_dir = vec3(0,-1, 0);
+    const float wk = g_wrapped_diffuse_k;
+    const float ndotl = clamp((dot(-1.0f*g_light_dir, normal.xyz()) + wk)/((1 + wk) * (1 + wk)), 0.0f, 1.0f);
+    const vec3 l = g_light_colour * g_light_strength;
+
     if(g_shading_view_mode == eShadingViewMode::kColor) {
         src = FColor(color.w, color.z, color.y, color.x);
     } else if(g_shading_view_mode == eShadingViewMode::kTexture) {
@@ -2324,12 +2338,11 @@ void renderPixel(int x, int y, float u, float v, float w, const TriSetup<FP16>& 
         vec3 n = 0.5f*normal.xyz() + vec3(0.5f);
         src = FColor(n.x, n.y, n.z, color.w);
     } else if(g_shading_view_mode == eShadingViewMode::kLighting) {
-        const float ndotl = max(0.1f, dot(-1.0f*light_dir, normal.xyz()));
-        src = FColor(ndotl, ndotl, ndotl, color.w);
+        src = FColor(l.x*ndotl, l.y*ndotl, l.z*ndotl, color.w);
     } else { // if(g_shading_view_mode == eShadingViewMode::kShader) {
         vec4 tex = sampleTexture(texcoord.xy(), g_current_texture, in_color).toVec4();
-        const float ndotl = max(0.1f, dot(-1.0f*light_dir, normal.xyz()));
-        vec4 c = tex * ndotl;
+        vec4 c = tex * l * g_light_strength * ndotl + g_ambient;
+        c = vec4(gamma(c.xyz(), g_gamma), c.w);
         src = FColor(c.w, c.z, c.y, c.x);
     }
 
@@ -4140,6 +4153,18 @@ void on_update() {
                 ImGui::RadioButton("Shader", &g_shading_view_mode, eShadingViewMode::kShader);
                 ImGui::Checkbox("Force checker", &g_b_force_checker);
                 ImGui::Checkbox("UV override", &g_b_uv_override);
+
+                ImGui::SeparatorText("Lighting:");
+                ImGui::ColorEdit3("ambient", (float*)&g_ambient);
+                ImGui::ColorEdit3("light colour", (float*)&g_light_colour);
+                ImGui::DragFloat("light strength", (float*)&g_light_strength, 0.01f, 0, 3);
+                if(ImGui::DragFloat3("light dir", (float*)&g_light_dir, 0.01f, -1, 1, "%.2f")) {
+                    if(len(g_light_dir) < eps) g_light_dir = vec3(1,0,0);
+                    g_light_dir = normalize(g_light_dir);
+                }
+                ImGui::DragFloat("wrap coeff", (float*)&g_wrapped_diffuse_k, 0.01f, 0, 1);
+                ImGui::DragFloat("gamma", (float*)&g_gamma, 0.01f, 0.1f, 3.0f);
+
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
