@@ -157,6 +157,7 @@ struct vec3 {
        float v[3];
     };
     operator float*() { return &x; }
+    float operator[](int i) const { assert(i>=0 && i<3); return v[i]; }
 };
 
 vec3 operator*(const vec3& v, float x) {
@@ -1186,6 +1187,7 @@ FP16 toFP(float v) {
     constexpr const float k = (1<<Fractional);
     v = v * k + 0.5f*(v>=0?1:-1);
     assert(v < MAX_FP);
+    assert(v > -MAX_FP);
     return (FP16)v;
 }
 
@@ -1334,6 +1336,7 @@ struct TriSetup {
 };
 
 #define FP_FracBits 4
+#define HalfFp (1<<(FP_FracBits-1))  // aka 0.5
 constexpr const i32 FP_MaxInteger = 1 << (sizeof(FP16)*8 - FP_FracBits - 1);
 
 FP16 toFixed(float v) {
@@ -1345,13 +1348,26 @@ FP16 toFixed(i32 v) {
     return (FP16)(v<<FP_FracBits);
 }
 
+Pt<FP16> toFixed(const Pt<float>& pt) {
+    return Pt<FP16>(toFixed(pt.x), toFixed(pt.y));
+}
+
 template<typename T>
 float fromFixed(T v) {
     return fromFP<FP_FracBits, T>(v);
 }
 
+template<>
+float fromFixed(float v) {
+    return v;
+}
+
 Pt<float> fromFixed(const Pt<FP16>& v) {
     return Pt<float>(fromFP<FP_FracBits>(v.x), fromFP<FP_FracBits>(v.y));
+}
+
+Pt<float> fromFixed(const Pt<float>& v) {
+    return v;
 }
 
 int fromFixed2Int(FP16 v) {
@@ -1451,10 +1467,27 @@ private:
     template<typename A>
     void setup(const Pt<A>& pt0, const Pt<A>& pt1, const Pt<A>& pt2) {
 
-        v[0] = float2FPSnapped(pt0.x, pt0.y);
-        v[1] = float2FPSnapped(pt1.x, pt1.y);
-        v[2] = float2FPSnapped(pt2.x, pt2.y);
+        // I snap vertices (and not just toFixed()) to FP_FracBits-1 precision, loosing one precision bit.
+        // So vertices are snapped to a more coarse grid.
+        // This is done to avoid precision issues when calculating edge functions
+        // E.g. for 2 tris sharing an edge: e0 for tri1 and e1 for tri1, 
+        // there could be a situation when 1st tri will have e.g. 
+        // e0(p): aa + bb = 15 (then shifted by FP_FracBits will be 0) - point not inside if not left/top edge
+        // another will have e1(p): aa + bb = -15 (then shifted by FP_FracBits will be -1) - point not inside
+        // so if 1st tri e0 is not left/top edge, it will also be counted as point is not inside
+        // so none of the 2 tris contains pixes -> hole
+        // Another way to solve this is to not do a final shift when calculating edge functios,
+        // effectively leaving 2*FP_FracBits precision (see traverse_aabb FpPrec)
+        // But for now it seems that adding "0.5" in edge calculation fixes the issue as well, see e0/e1/e2 functions 
 
+        //v[0] = float2FPSnapped(pt0.x, pt0.y);
+        //v[1] = float2FPSnapped(pt1.x, pt1.y);
+        //v[2] = float2FPSnapped(pt2.x, pt2.y);
+
+        v[0] = toFixed(pt0);
+        v[1] = toFixed(pt1);
+        v[2] = toFixed(pt2);
+        
         //                a                           b
         // e(x,y) = -(v2.y - v1.y)*(x - v1.x) + (v2.x - v1.x)*(y - v1.y)
         //        = a*x - a*v1.x + b*y - b*v1.y 
@@ -1478,8 +1511,29 @@ private:
         a[2] = -(v[1].y - v[0].y);
         c[2] = -((i32)a[2]*v[0].x + (i32)b[2]*v[0].y);
         t[2] = a[2]!=0 ? a[2]>0 : b[2]>0;
+
+        //FIXME: looks like we actually need to calculate oo2A using fp coords, as then 
+        // we use it to multiply to get u,v,w and if calculating using floats, barycentric could be > 1
+        // so can just calc area using floats to get CW/CCW ordering, but store actual area calculated with fp
         
+        // TODO: handle if area is 0 so that oo2A is inf
         oo2A = 1.0f/edge(fromFixed(v[0]), fromFixed(v[1]), fromFixed(v[2]));
+        // calculte area using floats as fixed point (12.4) do not have enough precision
+        // for very thin large triangles (predominantly in hor or vert orientation, 
+        // due to small a.x - b.x or a.y - b.y differences) and may flip CW to CCW
+        //float TwiceArea = edge(pt0, pt1, pt2);
+#if 0 // now moved to traverse_aabb
+        // even with floats, there could be issues with thin triangles
+        if(TwiceArea < 0.001f) {
+            TwiceArea = 0;
+            oo2A = INFINITY;
+            assert(isinf(INFINITY));
+        } else {
+            oo2A = 1.0f/TwiceArea;
+        }
+#else
+        //oo2A = 1.0f/TwiceArea;
+#endif
 
         ooHw[0] = 1.0f/hw[0];
         ooHw[1] = 1.0f/hw[1];
@@ -1528,36 +1582,37 @@ public:
         return r >> FP_FracBits;
     }
 
+    template<bool HiPrec = false>
     i32 e0(const Pt<FP16>& p) const {
         i32 dx = p.x - v[1].x;
-        i32 aa = ((i32)a[0] * dx);// >> FP_FracBits;
+        i32 aa = ((i32)a[0] * dx);
 
         i32 dy = p.y - v[1].y;
-        i32 bb = ((i32)b[0] * dy);// >> FP_FracBits;
-
-        // TODO: add and then >> FP_FracBits ?
-
-        return (aa + bb) >> FP_FracBits;
+        i32 bb = ((i32)b[0] * dy);
+        // adding .5 improves precision
+        return HiPrec ? aa + bb : (aa + bb + HalfFp) >> FP_FracBits;
     }
 
+    template<bool HiPrec = false>
     i32 e1(const Pt<FP16>& p) const {
         i32 dx = p.x - v[2].x;
-        i32 aa = ((i32)a[1] * dx);// >> FP_FracBits;
+        i32 aa = ((i32)a[1] * dx);
 
         i32 dy = p.y - v[2].y;
-        i32 bb = ((i32)b[1] * dy);// >> FP_FracBits;
-
-        return (aa + bb) >> FP_FracBits;
+        i32 bb = ((i32)b[1] * dy);
+        // adding .5 improves precision
+        return HiPrec ? aa + bb : (aa + bb + HalfFp) >> FP_FracBits;
     }
 
+    template<bool HiPrec = false>
     i32 e2(const Pt<FP16>& p) const {
         i32 dx = p.x - v[0].x;
-        i32 aa = ((i32)a[2] * dx);// >> FP_FracBits;
+        i32 aa = ((i32)a[2] * dx);
 
         i32 dy = p.y - v[0].y;
-        i32 bb = ((i32)b[2] * dy);// >> FP_FracBits;
-
-        return (aa + bb) >> FP_FracBits;
+        i32 bb = ((i32)b[2] * dy);
+        // adding .5 improves precision
+        return HiPrec ? aa + bb : (aa + bb + HalfFp) >> FP_FracBits;
     }
 
     i32 e0dx(FP16 x) const {
@@ -1576,13 +1631,16 @@ public:
     i32 e1dy(FP16 x) const { return ((i32)x*(i32)b[1])>>FP_FracBits; }
     i32 e2dy(FP16 x) const { return ((i32)x*(i32)b[2])>>FP_FracBits; }
 
-    FP16 e0ddx() const { return a[0]; }
-    FP16 e1ddx() const { return a[1]; }
-    FP16 e2ddx() const { return a[2]; }
+    // because I add this "high" precision feature I have to use i32 as a return value :(
+    // but I already have all my edge variables as i32 so not a big deal
+    // P.S. I am not using this feature really, so could just to back to FP16 as a ret val
+    template <bool FpPrec = false> i32 e0ddx() const { return a[0] << (FpPrec ? FP_FracBits : 0); }
+    template <bool FpPrec = false> i32 e1ddx() const { return a[1] << (FpPrec ? FP_FracBits : 0); }
+    template <bool FpPrec = false> i32 e2ddx() const { return a[2] << (FpPrec ? FP_FracBits : 0); }
 
-    FP16 e0ddy() const { return b[0]; }
-    FP16 e1ddy() const { return b[1]; }
-    FP16 e2ddy() const { return b[2]; }
+    template <bool FpPrec = false> i32 e0ddy() const { return b[0] << (FpPrec ? FP_FracBits : 0); }
+    template <bool FpPrec = false> i32 e1ddy() const { return b[1] << (FpPrec ? FP_FracBits : 0); }
+    template <bool FpPrec = false> i32 e2ddy() const { return b[2] << (FpPrec ? FP_FracBits : 0); }
 
     bool e(const Pt<FP16>& p) const { return e0(p) | e1(p) | e2(p); }
 };
@@ -2062,6 +2120,7 @@ enum eShadingViewMode: u8 { kColor, kTexture, kNormals, kLighting, kShader };
 
 bool g_b_draw_outline = false;
 bool g_b_draw_z_buf = false;
+bool g_b_draw_degenerate_tris = true;
 bool g_b_persp_corr = true;
 bool g_b_persp_corr_2nd_way = false;
 bool g_b_blend = true;
@@ -3230,6 +3289,14 @@ void traverse_aabb(const float sample_offset, TriSetup<S>* tris, int count) {
 
         const TriSetup<S>& ts = tris[i];
 
+        // small thin tris, could give incorrect area
+        if(ts.oo2A > 1000.0f && !g_b_draw_degenerate_tris) {
+            continue;
+        }
+
+        if(isinf(ts.oo2A) || ts.oo2A < 0) 
+            continue;
+
         S minX = min3(ts.v[0].x, ts.v[1].x, ts.v[2].x);
         S minY = min3(ts.v[0].y, ts.v[1].y, ts.v[2].y);
         S maxX = max3(ts.v[0].x, ts.v[1].x, ts.v[2].x);
@@ -3247,6 +3314,9 @@ void traverse_aabb(const float sample_offset, TriSetup<S>* tris, int count) {
         const int Width = max_xi - min_xi;
         const int Height = max_yi - min_yi;
 
+        constexpr const bool FpPrec = false;
+        constexpr const int EdgeFracBits = FpPrec ? 2*FP_FracBits : FP_FracBits;
+
         //printf("%d) minX:%d minY:%d maxX:%d maxY:%d\n", i, minX, minY, maxX, maxY);
         //printf("%d) min_x:%d min_y:%d max_x:%d max_y:%d\n", i, min_xi, min_yi, max_xi, max_yi);
 
@@ -3254,9 +3324,9 @@ void traverse_aabb(const float sample_offset, TriSetup<S>* tris, int count) {
         // we may add sampling offset in the inner loop to x & y
         Pt<S> o(toFixed(min_xi + sample_offset), toFixed(min_yi + sample_offset));
 
-        i32 e0o = ts.e0(o);
-        i32 e1o = ts.e1(o);
-        i32 e2o = ts.e2(o);
+        i32 e0o = ts.e0<FpPrec>(o);
+        i32 e1o = ts.e1<FpPrec>(o);
+        i32 e2o = ts.e2<FpPrec>(o);
 
         i32 e0 = e0o, e1 = e1o, e2 = e2o;
         i32 e0row = e0o, e1row = e1o, e2row = e2o;
@@ -3265,7 +3335,7 @@ void traverse_aabb(const float sample_offset, TriSetup<S>* tris, int count) {
 
         Grad<float> ooZ_grad(ts, ts.ooHw[0]*oo2A, ts.ooHw[1]*oo2A, ts.ooHw[2]*oo2A);
         float ooZ_row = ooZ_grad.e(vec2(min_xi + sample_offset, min_yi + sample_offset));
-        float ooZ;
+        float ooZ = 0;
 
         Grad<vec4> uv_grad(ts, ts.oo_attribs[ATT_TEXCOORD][0]*oo2A, ts.oo_attribs[ATT_TEXCOORD][1]*oo2A, ts.oo_attribs[ATT_TEXCOORD][2]*oo2A);
         vec4 uv_row = uv_grad.e(vec2(min_xi + sample_offset, min_yi + sample_offset));
@@ -3286,9 +3356,9 @@ void traverse_aabb(const float sample_offset, TriSetup<S>* tris, int count) {
                 Pt<S> p(o.x + toFixed(x), o.y + toFixed(y));
             
                 if(!g_b_delta_update) {
-                    e0 = ts.e0(p);
-                    e1 = ts.e1(p);
-                    e2 = ts.e2(p);
+                    e0 = ts.e0<FpPrec>(p);
+                    e1 = ts.e1<FpPrec>(p);
+                    e2 = ts.e2<FpPrec>(p);
                     vec2 pflt = vec2(fromFixed(p.x), fromFixed(p.y));
                     uv = uv_grad.e(pflt);
                     ooZ = ooZ_grad.e(pflt);
@@ -3302,14 +3372,16 @@ void traverse_aabb(const float sample_offset, TriSetup<S>* tris, int count) {
                 }
 
                 if (b_w) {
-                    int px = min_xi + x;//fromFixed2Int(p.x);
-                    int py = min_yi + y;//fromFixed2Int(p.y);
-                    float u = fromFixed(e0)*oo2A; // can remove oo2A multiply and do it after interpolation (or better even incorporate into values, to do it only once at setup)
-                    float v = fromFixed(e1)*oo2A;
-                    float w = (1-u-v);//fromFixed(e2)*oo2A;
-                    float pp_denom = (fromFixed(e0)*ts.ooHw[0] + fromFixed(e1)*ts.ooHw[1] + fromFixed(e2)*ts.ooHw[2]);
-                    float upp = fromFixed(e0)*ts.ooHw[0]/pp_denom;
-                    float vpp = fromFixed(e1)*ts.ooHw[1]/pp_denom;
+                    int px = min_xi + x;
+                    int py = min_yi + y;
+                    // can remove oo2A multiply and do it after interpolation (or better even incorporate into values, to do it only once at setup)
+                    const vec3 ev = vec3(fromFP<EdgeFracBits>(e0), fromFP<EdgeFracBits>(e1), fromFP<EdgeFracBits>(e2));
+                    float u = ev[0]*oo2A;
+                    float v = ev[1]*oo2A;
+                    float w = (1-u-v);
+                    float pp_denom = (ev[0]*ts.ooHw[0] + ev[1]*ts.ooHw[1] + ev[2]*ts.ooHw[2]);
+                    float upp = ev[0]*ts.ooHw[0]/pp_denom;
+                    float vpp = ev[1]*ts.ooHw[1]/pp_denom;
                     float wpp = (1-upp-vpp);
                     if(g_b_persp_corr && g_b_persp_corr_2nd_way) {
                         u = upp;
@@ -3327,18 +3399,18 @@ void traverse_aabb(const float sample_offset, TriSetup<S>* tris, int count) {
                 }
 
                 if(g_b_delta_update) {
-                    e0 += ts.e0ddx();
-                    e1 += ts.e1ddx();
-                    e2 += ts.e2ddx();
+                    e0 += ts.e0ddx<FpPrec>();
+                    e1 += ts.e1ddx<FpPrec>();
+                    e2 += ts.e2ddx<FpPrec>();
                     uv = uv + uv_grad.dx();
                     ooZ = ooZ + ooZ_grad.dx();
                 }
             }
 
             if(g_b_delta_update) {
-                e0row = e0row + ts.e0ddy();
-                e1row = e1row + ts.e1ddy();
-                e2row = e2row + ts.e2ddy();
+                e0row = e0row + ts.e0ddy<FpPrec>();
+                e1row = e1row + ts.e1ddy<FpPrec>();
+                e2row = e2row + ts.e2ddy<FpPrec>();
                 uv_row = uv_row + uv_grad.dy();
                 ooZ_row = ooZ_row + ooZ_grad.dy();
             }
@@ -3893,6 +3965,7 @@ void on_update() {
                 ImGui::Checkbox("Blend", &g_b_blend);ImGui::SameLine();
                 ImGui::Checkbox("Outline", &g_b_draw_outline); ImGui::SameLine();
                 ImGui::Checkbox("Zbuf", &g_b_draw_z_buf); ImGui::SameLine();
+                ImGui::Checkbox("DrawDegenerate", &g_b_draw_degenerate_tris); ImGui::SameLine();
                 ImGui::Checkbox("Animate", &g_b_animate); ImGui::SameLine();
                 ImGui::Checkbox("Grid", &g_b_draw_grid);
                 ImGui::Checkbox("Wireframe", &g_b_draw_wireframe);
