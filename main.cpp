@@ -4063,23 +4063,34 @@ void on_update() {
         }
 
         ImGui::SameLine();
-        static DirList models_dl;
-        const char* const models_base_dir = "./data/halloween/Models/";
+        static BufferT<DirList, int> dir_lists;
+        //static DirList models_dl;
+        const char* const models_base_dir[] = { "./data/halloween/Models/", "./data/test/", "./data/sci-fi/_models/", nullptr };
         if(ImGui::Button("Add Obj")) {
             ImGui::OpenPopup("dir_list");
-            destroy_dir_list(models_dl);
-            models_dl = make_dir_list(models_base_dir, "obj");
+            for(int i=0;i<dir_lists.size();++i) {
+                destroy_dir_list(dir_lists[i]);
+            }
+            dir_lists.reset();
+            int i=0;
+            while(models_base_dir[i]) {
+                dir_lists.push(make_dir_list(models_base_dir[i], "obj"));
+                i++;
+            }
         }
         if (ImGui::BeginPopup("dir_list")) {
-            ImGui::SeparatorText("Models");
-            for (int i = 0; i < models_dl.entries.size(); i++) {
-                if (ImGui::Selectable(models_dl.entries[i].data)) {
-                    Cut c = cut(models_dl.entries[i], '.');
-                    Str s = alloc_str_from_arena(models_dl.arena, c.head.data, c.head.len + 1);
-                    Str base = { models_base_dir, (ptrdiff_t)strlen(models_base_dir) };
-                    ObjModel* mdl = add_resource(g_models, s.data, alloc_concat_from_arena(models_dl.arena, base, models_dl.entries[i]).data);
-                    Object o = {alloc_str_from_arena(g_string_arena, "objX"), mdl, nullptr, vec3(0, 0, -1), vec3(0), vec3(1) };
-                    g_objects.push(o);
+            for(int d=0;d<dir_lists.size();++d) {
+                ImGui::SeparatorText("------");
+                DirList& models_dl = dir_lists[d];
+                for (int i = 0; i < models_dl.entries.size(); i++) {
+                    if (ImGui::Selectable(models_dl.entries[i].data)) {
+                        Cut c = cut(models_dl.entries[i], '.');
+                        Str s = alloc_str_from_arena(models_dl.arena, c.head.data, c.head.len + 1);
+                        Str base = { models_base_dir[d], (ptrdiff_t)strlen(models_base_dir[d]) };
+                        ObjModel* mdl = add_resource(g_models, s.data, alloc_concat_from_arena(models_dl.arena, base, models_dl.entries[i]).data);
+                        Object o = {alloc_str_from_arena(g_string_arena, "objX"), mdl, nullptr, vec3(0, 0, -1), vec3(0), vec3(1) };
+                        g_objects.push(o);
+                    }
                 }
             }
             ImGui::EndPopup();
@@ -4110,6 +4121,7 @@ void on_update() {
                     fread(&o.euler_, sizeof(o.euler_), 1, fp);
                     fread(&o.scale_, sizeof(o.scale_), 1, fp);
                     fread(&o.draw_flags, sizeof(o.draw_flags), 1, fp);
+
                     g_objects.push(o);
                 }
                 fclose(fp);
@@ -4161,24 +4173,35 @@ void draw_object_info(ObjList& ol) {
             ImGui::Checkbox("blend", &o.draw_flags.b_blend); ImGui::SameLine();
             ImGui::DragFloat2("scroll uv", (float*)&o.draw_flags.scroll_uv);
 
-            static DirList tex_dl;
-            const char* const tex_base_dir = "./data/halloween/Textures/tga/";
+            static BufferT<DirList,int> dir_lists;
+            const char* const tex_base_dir[] = { "./data/halloween/Textures/tga/", "./data/sci-fi/_models/", nullptr};
             if (ImGui::Button("Texture..")) {
                 ImGui::OpenPopup("select_texture");
-                destroy_dir_list(tex_dl);
-                tex_dl = make_dir_list(tex_base_dir, "tga");
+
+                for(int i=0;i<dir_lists.size();++i) {
+                    destroy_dir_list(dir_lists[i]);
+                }
+                dir_lists.reset();
+                int i=0;
+                while(tex_base_dir[i]) {
+                    dir_lists.push(make_dir_list(tex_base_dir[i], "tga"));
+                    i++;
+                }
             }
             ImGui::SameLine();
             ImGui::TextUnformatted((o.texture_ && o.texture_->filename_.data) ? o.texture_->filename_.data : "<NULL>");
 
             if (ImGui::BeginPopup("select_texture")) {
-                ImGui::SeparatorText("Texures");
-                for (int ti = 0; ti < tex_dl.entries.size(); ti++) {
-                    if (ImGui::Selectable(tex_dl.entries[ti].data)) {
-                        Cut c = cut(tex_dl.entries[ti], '.');
-                        Str s = alloc_str_from_arena(tex_dl.arena, c.head.data, c.head.len + 1);
-                        Str base = { tex_base_dir, (ptrdiff_t)strlen(tex_base_dir) };
-                        g_objects[i].texture_ = add_resource(g_textures, s.data, alloc_concat_from_arena(tex_dl.arena, base, tex_dl.entries[ti]).data);
+                for(int d=0;d<dir_lists.size();++d) {
+                    ImGui::SeparatorText("-----");
+                    DirList& tex_dl = dir_lists[d];
+                    for (int ti = 0; ti < tex_dl.entries.size(); ti++) {
+                        if (ImGui::Selectable(tex_dl.entries[ti].data)) {
+                            Cut c = cut(tex_dl.entries[ti], '.');
+                            Str s = alloc_str_from_arena(tex_dl.arena, c.head.data, c.head.len + 1);
+                            Str base = { tex_base_dir[d], (ptrdiff_t)strlen(tex_base_dir[d]) };
+                            g_objects[i].texture_ = add_resource(g_textures, s.data, alloc_concat_from_arena(tex_dl.arena, base, tex_dl.entries[ti]).data);
+                        }
                     }
                 }
                 ImGui::EndPopup();
