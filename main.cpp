@@ -1216,6 +1216,23 @@ u8 g_cull_face = CULL_FACE_NONE; // 0 - none, true; // false by default?
 bool do_exit = false;
 
 
+Pt<float> NDC2Win(float x, float y, float w, float h) {
+    return Pt<float>((x*0.5f + 0.5f)*w, (y*0.5f+0.5f)*h);
+}
+
+Pt<float> Win2NDC(float x, float y, float w, float h) {
+    return Pt<float>((x/w - 0.5f)*2.0f, (y/h - 0.5f)*2.0f);
+}
+
+template<typename T> 
+T edge(const Pt<T>& a, const Pt<T>& b, const Pt<T>& c) {
+    return -(b.y - a.y)*(c.x - a.x) + (b.x - a.x)*(c.y - a.y);
+};
+
+template<typename T> 
+float edge(const T& a, const T& b, const T& c) {
+    return -(b.y - a.y)*(c.x - a.x) + (b.x - a.x)*(c.y - a.y);
+};
 
 
 /*        CW
@@ -1230,82 +1247,91 @@ bool do_exit = false;
 
 template <typename T>
 struct TriSetup {
-    T a0, b0;
-    T a1, b1;
-    T a2, b2;
-    bool t0, t1, t2;
 
-    Pt<T> v0,v1,v2;
+    T a[3];
+    T b[3];
+    T c[3];
+    bool t[3];
 
-    TriSetup(const Pt<T>& pt0, const Pt<T>& pt1, const Pt<T>& pt2) {
-        setup(pt0, pt1, pt2);
+    vec4 v0,v1,v2;
+    vec4 p[3]; // debug
+    Pt<T> v[3];
+
+    float oo2A;
+
+    TriSetup(const vec4& p0, const vec4& p1, const vec4& p2) {
+
+        vec4 pt0 = g_cull_face == CULL_FACE_CCW ? p1 : p0;
+        vec4 pt1 = g_cull_face == CULL_FACE_CCW ? p0 : p1;
+        vec4 pt2 = p2;
+
+        p[0] = pt0;
+        p[1] = pt1;
+        p[2] = pt2;
+
+        setup(NDC2Win(pt0.x/pt0.w, pt0.y/pt0.w, g_tex_w, g_tex_h), 
+                NDC2Win(pt1.x/pt1.w, pt1.y/pt1.w, g_tex_w, g_tex_h),
+                NDC2Win(pt2.x/pt2.w, pt2.y/pt2.w, g_tex_w, g_tex_h));
     }
 
     void setup(const Pt<T>& pt0, const Pt<T>& pt1, const Pt<T>& pt2) {
 
-        v0 = pt0;
-        v1 = pt1;
-        v2 = pt2;
+        v[0] = pt0;
+        v[1] = pt1;
+        v[2] = pt2;
 
-        b0 = pt2.x - pt1.x;
-        a0 = -(pt2.y - pt1.y);
-        t0 = a0!=0 ? a0>0 : b0<0;
+        b[0] = pt2.x - pt1.x;
+        a[0] = -(pt2.y - pt1.y);
+        t[0] = a[0]!=0 ? a[0]>0 : b[0]<0;
 
-        b1 = pt0.x - pt2.x;
-        a1 = -(pt0.y - pt2.y);
-        t1 = a1!=0 ? a1>0 : b1<0;
+        b[1] = pt0.x - pt2.x;
+        a[1] = -(pt0.y - pt2.y);
+        t[1] = a[1]!=0 ? a[1]>0 : b[1]<0;
 
-        b2 = pt1.x - pt0.x;
-        a2 = -(pt1.y - pt0.y);
-        t2 = a2!=0 ? a2>0 : b2<0;
+        b[2] = pt1.x - pt0.x;
+        a[2] = -(pt1.y - pt0.y);
+        t[2] = a[2]!=0 ? a[2]>0 : b[2]<0;
+
+        // TODO: handle if area is 0 so that oo2A is inf
+        oo2A = 1.0f/edge(v[0], v[1], v[2]);
+
     }
 
     bool inside0(const Pt<T>& p) const {
         int r = e0(p);
-        return r > 0 || (r == 0 && t0);
+        return r > 0 || (r == 0 && t[0]);
     }
     bool inside1(const Pt<T>& p) const {
         int r = e1(p);
-        return r > 0 || (r == 0 && t1);
+        return r > 0 || (r == 0 && t[1]);
     }
     bool inside2(const Pt<T>& p) const {
         int r = e2(p);
-        return r > 0 || (r == 0 && t2);
+        return r > 0 || (r == 0 && t[2]);
     }
 
-    bool inside0(int e) { return e > 0 || (e == 0 && t0); }
-    bool inside1(int e) { return e > 0 || (e == 0 && t1); }
-    bool inside2(int e) { return e > 0 || (e == 0 && t2); }
+    bool inside0(int e) { return e > 0 || (e == 0 && t[0]); }
+    bool inside1(int e) { return e > 0 || (e == 0 && t[1]); }
+    bool inside2(int e) { return e > 0 || (e == 0 && t[2]); }
 
     bool inside(const Pt<T>& p) {
         return inside0(e0(p)) && inside1(e1(p)) && inside2(e2(p));
     }
 
-    T e0(const Pt<T>& p) const { return a0*(p.x - v1.x) + b0*(p.y - v1.y); }
-    T e1(const Pt<T>& p) const { return a1*(p.x - v2.x) + b1*(p.y - v2.y); }
-    T e2(const Pt<T>& p) const { return a2*(p.x - v0.x) + b2*(p.y - v0.y); }
+    T e0(const Pt<T>& p) const { return a[0]*(p.x - v1.x) + b[0]*(p.y - v1.y); }
+    T e1(const Pt<T>& p) const { return a[1]*(p.x - v2.x) + b[1]*(p.y - v2.y); }
+    T e2(const Pt<T>& p) const { return a[2]*(p.x - v0.x) + b[2]*(p.y - v0.y); }
 
-    T e0dx(T x) const { return x*a0; }
-    T e1dx(T x) const { return x*a1; }
-    T e2dx(T x) const { return x*a2; }
+    T e0dx(T x) const { return x*a[0]; }
+    T e1dx(T x) const { return x*a[1]; }
+    T e2dx(T x) const { return x*a[2]; }
 
-    T e0dy(T x) const { return x*b0; }
-    T e1dy(T x) const { return x*b1; }
-    T e2dy(T x) const { return x*b2; }
+    T e0dy(T x) const { return x*b[0]; }
+    T e1dy(T x) const { return x*b[1]; }
+    T e2dy(T x) const { return x*b[2]; }
 
     bool e(const Pt<T>& p) const { return e0(p) | e1(p) | e2(p); }
 };
-
-template<typename T> 
-T edge(const Pt<T>& a, const Pt<T>& b, const Pt<T>& c) {
-    return -(b.y - a.y)*(c.x - a.x) + (b.x - a.x)*(c.y - a.y);
-};
-
-template<typename T> 
-float edge(const T& a, const T& b, const T& c) {
-    return -(b.y - a.y)*(c.x - a.x) + (b.x - a.x)*(c.y - a.y);
-};
-
 
 #define FP_FracBits 4
 constexpr const i32 FP_MaxInteger = 1 << (sizeof(FP16)*8 - FP_FracBits - 1);
@@ -1347,15 +1373,6 @@ ImVec2 FixedToUI(Pt<FP16> v, int scale) {
 float ToUI(FP16 v, int scale) {
     return fromFixed(v)*scale;
 }
-
-Pt<float> NDC2Win(float x, float y, float w, float h) {
-    return Pt<float>((x*0.5f + 0.5f)*w, (y*0.5f+0.5f)*h);
-}
-
-Pt<float> Win2NDC(float x, float y, float w, float h) {
-    return Pt<float>((x/w - 0.5f)*2.0f, (y/h - 0.5f)*2.0f);
-}
-
 
 const constexpr int ATT_COUNT = 3;
 const constexpr int ATT_COLOR = 0;
@@ -1597,6 +1614,7 @@ struct Grad {
 //typedef int S;
 typedef FP16 S;
 using TriBuffer = BufferT<TriSetup<S>>;
+using TriBufferF = BufferT<TriSetup<float>>;
 
 struct trivec4 {
     vec4 v0, v1, v2;
@@ -2352,6 +2370,7 @@ int g_scale_idx = 1;
 Pt<float> g_v0_offset;
 
 TriBuffer g_tris;
+TriBufferF g_tris_notclipped;
 VertexBuffer2D g_vertices;
 DrawCallList g_draw_calls;
 
@@ -2412,6 +2431,7 @@ Projection g_proj_params = g_proj_params_def;
 const Frustum g_frustum_def = { 90.0f, (float)g_tex_w/g_tex_h, g_proj_params_def.near, g_proj_params_def.far};
 Frustum g_frustum = g_frustum_def;
 m44 g_mproj = m44::identity();
+m44 g_mview = m44::identity();
 
 
 float g_s = 1.0f;
@@ -2422,7 +2442,9 @@ ObjModel* g_obj = nullptr;
 bool exit_request() { return do_exit; }
 
 
-void init_scene(TriBuffer& tb, VertexBuffer2D& dyn_vb, m44 mproj) {
+void init_scene(TriBuffer& tb, TriBufferF& tbnc, VertexBuffer2D& dyn_vb, m44 mproj, const m44 mview) {
+
+    const m44 viewproj = mul(mproj, mview);
 
     static const vec4 quad_uv[4] = {
         vec4(0, 0, 0, 0),
@@ -2503,7 +2525,7 @@ void init_scene(TriBuffer& tb, VertexBuffer2D& dyn_vb, m44 mproj) {
         const float sy = sx;
         vec4 off(-1.1f,-.5f,0,0);
         vec4 in( sx*vb[i].x, sy*vb[i].y, vb[i].z == 0 ? view_z : vb[i].z, 1);
-        vb[i] = mul(mproj, in + off);
+        vb[i] = mul(viewproj, in + off);
     }
 
     struct fake_uv_maker {
@@ -2516,6 +2538,7 @@ void init_scene(TriBuffer& tb, VertexBuffer2D& dyn_vb, m44 mproj) {
     } make_fake_uv;
 
     tb.reset();
+    tbnc.reset();
     g_draw_calls.reset();
 
 #if 1
@@ -2682,7 +2705,7 @@ void init_scene(TriBuffer& tb, VertexBuffer2D& dyn_vb, m44 mproj) {
     m44 my_proj = mproj;//make_proj(-g_proj_params.right, g_proj_params.right, 
             //-g_proj_params.top, g_proj_params.top, 
             //g_proj_params.near, g_proj_params.far);
-
+    (void)my_proj;
     // 2 attributes to interpolate, each plane can create 2 triangles out of 1, so max produced tris is 2^6
     trivec4 o_tri[MAX_CLIP_TRI];
     trivec4 o_attr[MAX_CLIP_TRI*ATT_COUNT]; 
@@ -2701,10 +2724,9 @@ void init_scene(TriBuffer& tb, VertexBuffer2D& dyn_vb, m44 mproj) {
             const vec4& v1 = vb[i1];
             const vec4& v2 = vb[i2];
             
-
-            vec4 v0p = mul(my_proj, v0);
-            vec4 v1p = mul(my_proj, v1);
-            vec4 v2p = mul(my_proj, v2);
+            vec4 v0p = mul(viewproj, v0);
+            vec4 v1p = mul(viewproj, v1);
+            vec4 v2p = mul(viewproj, v2);
 
             trivec4 attribs[ATT_COUNT] = {
                 { mesh_attr[i0%3], mesh_attr[i1%3], mesh_attr[i2%3]},
@@ -2727,6 +2749,8 @@ void init_scene(TriBuffer& tb, VertexBuffer2D& dyn_vb, m44 mproj) {
                 tb.last().set_attribs(0, mesh_attr[i0%3], mesh_attr[i1%3], mesh_attr[i2%3]);  
                 tb.last().set_attribs(1, quad_uv[i0%4], quad_uv[i1%4], quad_uv[i2%4]);  
             }
+
+            tbnc.push(TriSetup<float>(v0p, v1p, v2p));
         }
     }
 
@@ -2765,6 +2789,7 @@ void init_scene(TriBuffer& tb, VertexBuffer2D& dyn_vb, m44 mproj) {
 
         m44 rotM = rotateXYZ(o.euler_.x, o.euler_.y, o.euler_.z);
         //m44 rotM = rotateXZ(rot_angle_rad);
+        bool b_has_normals = mdl->n.size() > 0;
 
         for(int i=0;i<(int)ib.size(); i+=inc) {
             const ObjModel::V i0 = ib[i+0];
@@ -2790,20 +2815,10 @@ void init_scene(TriBuffer& tb, VertexBuffer2D& dyn_vb, m44 mproj) {
                 t2.y = t2.y + v_offset*o.draw_flags.scroll_uv.y;
             }
 
-            vec4 n0 = vec4(mdl->n[i0.n], 0);
-            vec4 n1 = vec4(mdl->n[i1.n], 0);
-            vec4 n2 = vec4(mdl->n[i2.n], 0);
-#if 0
-            v0 = mul(rotM, v0 - center);
-            v1 = mul(rotM, v1 - center);
-            v2 = mul(rotM, v2 - center);
-            v0 = v0 + center;
-            v1 = v1 + center;
-            v2 = v2 + center;
-            vec4 v0p = mul(my_proj, s*(v0 + pos));
-            vec4 v1p = mul(my_proj, s*(v1 + pos));
-            vec4 v2p = mul(my_proj, s*(v2 + pos));
-#else
+            vec4 n0 = b_has_normals ? vec4(mdl->n[i0.n], 0) : normalize(cross(normalize((v1 - v0).xyz()), normalize((v2 - v0).xyz())));
+            vec4 n1 = b_has_normals ? vec4(mdl->n[i1.n], 0) : normalize(cross(normalize((v1 - v0).xyz()), normalize((v2 - v0).xyz())));
+            vec4 n2 = b_has_normals ? vec4(mdl->n[i2.n], 0) : normalize(cross(normalize((v1 - v0).xyz()), normalize((v2 - v0).xyz())));
+
             v0 = v0 * vec4(o.scale_, 1);
             v0 = mul(rotM, v0);
             v0 = v0 + o.pos_;
@@ -2813,21 +2828,22 @@ void init_scene(TriBuffer& tb, VertexBuffer2D& dyn_vb, m44 mproj) {
             v2 = v2 * vec4(o.scale_, 1);
             v2 = mul(rotM, v2);
             v2 = v2 + o.pos_;
-            vec4 v0p = mul(my_proj, v0);
-            vec4 v1p = mul(my_proj, v1);
-            vec4 v2p = mul(my_proj, v2);
 
-            n0 = mul(rotM, n0);
-            n1 = mul(rotM, n1);
-            n2 = mul(rotM, n2);
-#endif
+            //vec4 v0v = mul(mview, v0);
+            //vec4 v0p = mul(mproj, v0v);
+            vec4 v0p = mul(viewproj, v0);
+            vec4 v1p = mul(viewproj, v1);
+            vec4 v2p = mul(viewproj, v2);
+
+            n0 = mul(mview, mul(rotM, n0));
+            n1 = mul(mview, mul(rotM, n1));
+            n2 = mul(mview, mul(rotM, n2));
 
             trivec4 attribs[ATT_COUNT] = {
                 { n0, n1, n2 },
                 { t0, t1, t2 },
                 { n0, n1, n2 },
             };
-
 
             if(g_b_clip) {
                 const int ntris = clip_triangle((u8)g_clip_mask, v0p, v1p, v2p, attribs, o_tri, o_attr, MAX_CLIP_TRI);
@@ -2846,6 +2862,8 @@ void init_scene(TriBuffer& tb, VertexBuffer2D& dyn_vb, m44 mproj) {
                 tb.last().set_attribs(1, t0, t1, t2);  
                 tb.last().set_attribs(2, n0, n1, n2);  
             }
+
+            tbnc.push(TriSetup<float>(v0p, v1p, v2p));
         }
 
         g_draw_calls.push(DrawCallInfo{o.texture_, obj_model_start_tri, (int)tb.size() - obj_model_start_tri, false});
@@ -3534,7 +3552,7 @@ void on_update() {
 #endif
 
 
-    init_scene(g_tris, g_vertices, g_mproj);
+    init_scene(g_tris, g_tris_notclipped, g_vertices, g_mproj, g_mview);
 
 #if 0
     uint64_t cur_time_ms = get_time_usec() / 1000;
@@ -3941,6 +3959,10 @@ void on_update() {
                     extern void draw_triangle_info(TriBuffer& tris);
                     draw_triangle_info(g_tris);
                 }
+                if (ImGui::CollapsingHeader("Triangles Before Clipping", ImGuiTreeNodeFlags_None)) {
+                    extern void draw_triangle_info_f(TriBufferF& tris);
+                    draw_triangle_info_f(g_tris_notclipped);
+                }
 
                 ImGui::EndTabItem();
             }
@@ -4302,6 +4324,115 @@ void draw_triangle_info(TriBuffer& tris)
                     ImGui::Text("%d (%.3f)", ts.v[i].y, fromFixed(ts.v[i].y));
                 }
                 ImGui::EndTable();
+            }
+
+            ImGui::TreePop();
+        } // Tree Node
+    }
+    ImGui::PopStyleVar(2);
+}
+
+// TODO: use draw_triangle_info for this as well
+void draw_triangle_info_f(TriBufferF& tris) 
+{
+    ImGuiStyle& style = ImGui::GetStyle();
+    ImGui::PushStyleVarY(ImGuiStyleVar_FramePadding, (float)(int)(style.FramePadding.y * 0.60f));
+    ImGui::PushStyleVarY(ImGuiStyleVar_ItemSpacing, (float)(int)(style.ItemSpacing.y * 0.60f));
+
+    for(int i=0; i<(int)tris.size();++i) {
+
+        const TriSetup<float>& ts = tris[i];
+
+        if (ImGui::TreeNode((void*)(intptr_t)&ts, "Triangle %d %s", i, g_active_triangle == i ? "active":"")) {
+
+            ImGui::Text("Area inv: %f", ts.oo2A);
+
+            static ImGuiTableFlags flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersV;
+            if (ImGui::BeginTable("Setup", 4, flags))
+            {
+                // Submit columns name with TableSetupColumn() and call TableHeadersRow() to create a row with a header in each column.
+                // (Later we will show how TableSetupColumn() has other uses, optional flags, sizing weight etc.)
+                ImGui::TableSetupColumn("name");
+                ImGui::TableSetupColumn("e0");
+                ImGui::TableSetupColumn("e1");
+                ImGui::TableSetupColumn("e2");
+                ImGui::TableHeadersRow();
+
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::Text("a");
+                for (int column = 1; column < 4; column++)
+                {
+                    ImGui::TableSetColumnIndex(column);
+                    ImGui::Text("%f (%.3f)", ts.a[column - 1], fromFixed(ts.a[column - 1]));
+                }
+
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::Text("b");
+                for (int column = 1; column < 4; column++)
+                {
+                    ImGui::TableSetColumnIndex(column);
+                    ImGui::Text("%f (%.3f)", ts.b[column - 1], fromFixed(ts.b[column - 1]));
+                }
+
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::Text("c");
+                for (int column = 1; column < 4; column++)
+                {
+                    ImGui::TableSetColumnIndex(column);
+                    ImGui::Text("%f (%.3f)", ts.c[column - 1], fromFixed(ts.c[column - 1]));
+                }
+
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::Text("t");
+                for (int column = 1; column < 4; column++)
+                {
+                    ImGui::TableSetColumnIndex(column);
+                    ImGui::Text("%d", ts.t[column - 1]);
+                }
+
+                ImGui::EndTable();
+            }
+
+            if (ImGui::BeginTable("Vertices", 4, flags))
+            {
+                ImGui::TableSetupColumn("name");
+                ImGui::TableSetupColumn("x");
+                ImGui::TableSetupColumn("y");
+                ImGui::TableSetupColumn("z/w");
+                ImGui::TableHeadersRow();
+
+                for(int i=0;i<3;++i) {
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::Text("v%d", i);
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::Text("%f (%.3f)", ts.v[i].x, fromFixed(ts.v[i].x));
+                    ImGui::TableSetColumnIndex(2);
+                    ImGui::Text("%f (%.3f)", ts.v[i].y, fromFixed(ts.v[i].y));
+                    ImGui::TableSetColumnIndex(3);
+                    ImGui::Text("z:%.3f w:%.3f (%.3f)", ts.p[i].z, ts.p[i].w, ts.p[i].z/ts.p[i].w);
+                }
+                ImGui::EndTable();
+            }
+
+            if(i == 12) {
+                printf("v0: %f %f\n", ts.v[0].x, ts.v[0].y);
+                printf("v1: %f %f\n", ts.v[1].x, ts.v[1].y);
+                printf("v2: %f %f\n", ts.v[2].x, ts.v[2].y);
+                printf("Area0: %f\n", edge(ts.v[0], ts.v[1], ts.v[2]));
+                printf("Area1: %f\n", edge(ts.v[1], ts.v[2], ts.v[0]));
+                printf("Area2: %f\n", edge(ts.v[2], ts.v[0], ts.v[1]));
+
+                Pt<double> v0d = Pt<double>(ts.v[0].x, ts.v[0].y);
+                Pt<double> v1d = Pt<double>(ts.v[1].x, ts.v[1].y);
+                Pt<double> v2d = Pt<double>(ts.v[2].x, ts.v[2].y);
+                printf("Area0d: %f\n", edge(v0d, v1d, v2d));
+                printf("Area1d: %f\n", edge(v1d, v2d, v0d));
+                printf("Area2d: %f\n", edge(v2d, v0d, v1d));
             }
 
             ImGui::TreePop();
