@@ -2262,7 +2262,10 @@ FColor sampleTexture(vec2 uv, Image* texture, FColor in_color) {
 }
 
 // 0xAARRGGBB
-void renderPixel(int x, int y, float u, float v, float w, const TriSetup<FP16>& ts, u32 incolor, const vec4& uv_override, float oohw) {
+void renderPixel(int x, int y, float u, float v, float w, const TriSetup<FP16>& ts, u32 incolor, const vec4* att_override, const float hw, float oohw) {
+    assert(y>=0 && y < g_tex_h);
+    assert(x>=0 && x < g_tex_w);
+
     u32 c = g_fb[y*g_tex_w + x];
 
     FColor in_color = FColor::fromU32(incolor);
@@ -2727,7 +2730,7 @@ void init_scene(TriBuffer& tb, TriBufferF& tbnc, VertexBuffer2D& dyn_vb, m44 mpr
 #endif
 
     // tilted quad
-    float quad_scale = 1;
+    float quad_scale = 1; (void)quad_scale;
     vec4 quad_pos = vec4(-0.5f*0, 0,-0,0) + g_p;
     const int quad_vb_offset = (int)g_meshes.vb.size();
 #if 0
@@ -2735,7 +2738,9 @@ void init_scene(TriBuffer& tb, TriBufferF& tbnc, VertexBuffer2D& dyn_vb, m44 mpr
     g_meshes.vb.push(quad_scale*vec4(-1*g_s, -0.95f, -1*g_s, 1) + quad_pos);
     g_meshes.vb.push(quad_scale*vec4( 1*g_s, -0.95f, -1*g_s, 1) + quad_pos);
     g_meshes.vb.push(quad_scale*vec4( 1*g_s, -0.95f, 1*g_s, 1) + quad_pos);
-#else
+#endif
+
+#if 1
     g_meshes.vb.push(quad_scale*vec4(-1*g_s, -0.95f, -2*g_s, 0) + quad_pos);
     g_meshes.vb.push(quad_scale*vec4(-1*g_s, 0.95f, -1.5*g_s, 0) + quad_pos);
     g_meshes.vb.push(quad_scale*vec4( 1*g_s, 0.95f, -1.5*g_s, 0) + quad_pos);
@@ -3194,10 +3199,17 @@ void on_init() {
     g_models.push({"pumpkin_03_hat", "./data/halloween/Models/pumpkin_03_hat.obj", nullptr});
     g_models.push({"candle_01", "./data/halloween/Models/candle_01.obj", nullptr});
     g_models.push({"text", "./data/halloween/Halloween_text.obj", nullptr});
+    g_models.push({"triangle", "./data/triangle.obj", nullptr});
+    g_models.push({"o", "./data/test/o2.obj", nullptr});
+    g_models.push({"o2", "./data/test/o2.obj", nullptr});
+    g_models.push({"o2", "./data/sci-fi/_models/uvmap.tga", nullptr});
 
     g_textures.push({ "pumpkin_03", "./data/halloween/Textures/pumpkin_03.tga", nullptr });
     g_textures.push({ "Candles", "./data/halloween/Textures/tga/Candles.tga", nullptr });
     g_textures.push({ "noise", nullptr, make_some_noise(256, 256)});
+
+    g_textures.push({ "fighter_wilko", "./data/sci-fi/_models/wilko.tga", nullptr });
+    g_textures.push({ "fighter_uvmap", "./data/sci-fi/_models/uvmap.tga", nullptr });
 
     if(!load_resources()) {
         exit(1);
