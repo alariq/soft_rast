@@ -1644,8 +1644,8 @@ int clip_plane(u8 flags, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[ATT_COUNT]
     switch (flags) {
     case 0:
         tris[ntri] = { v0, v1, v2 };
-        o_attr[ntri*ATT_COUNT + 0] = i_attr[0];
-        o_attr[ntri*ATT_COUNT + 1] = i_attr[1];
+        for(int i=0;i<ATT_COUNT;++i)
+            o_attr[ntri*ATT_COUNT + i] = i_attr[i];
         return 1;
     case 7:
         return 0;
@@ -1656,15 +1656,15 @@ int clip_plane(u8 flags, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[ATT_COUNT]
         flags = 4;
     case 5:
         rotate_left(v0, v1, v2);
-        rotate_left(i_attr[0].v0, i_attr[0].v1, i_attr[0].v2);
-        rotate_left(i_attr[1].v0, i_attr[1].v1, i_attr[1].v2);
+        for(int i=0;i<ATT_COUNT;++i)
+            rotate_left(i_attr[i].v0, i_attr[i].v1, i_attr[i].v2);
         break;
     case 2:
         flags = 4;
     case 3:
         rotate_right(v0, v1, v2);
-        rotate_right(i_attr[0].v0, i_attr[0].v1, i_attr[0].v2);
-        rotate_right(i_attr[1].v0, i_attr[1].v1, i_attr[1].v2);
+        for(int i=0;i<ATT_COUNT;++i)
+            rotate_right(i_attr[i].v0, i_attr[i].v1, i_attr[i].v2);
         break;
     }
 
@@ -1683,10 +1683,12 @@ int clip_plane(u8 flags, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[ATT_COUNT]
 
         vec4 a0v12 = Hw12*lerp(ooHw[1]*i_attr[0].v1, ooHw[2]*i_attr[0].v2, t12);
         vec4 a1v12 = Hw12*lerp(ooHw[1]*i_attr[1].v1, ooHw[2]*i_attr[1].v2, t12);
+        vec4 a2v12 = Hw12*lerp(ooHw[1]*i_attr[2].v1, ooHw[2]*i_attr[2].v2, t12);
 
         tris[ntri] = { v0, v1, v12 };
         o_attr[ntri*ATT_COUNT + 0] = {i_attr[0].v0, i_attr[0].v1, a0v12};
         o_attr[ntri*ATT_COUNT + 1] = {i_attr[1].v0, i_attr[1].v1, a1v12};
+        o_attr[ntri*ATT_COUNT + 2] = {i_attr[2].v0, i_attr[2].v1, a2v12};
         ntri++;
 
         const float t02 = (V - v0p[A])/(v2p[A] - v0p[A]);
@@ -1695,10 +1697,12 @@ int clip_plane(u8 flags, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[ATT_COUNT]
 
         vec4 a0v02 = Hw02 * lerp(ooHw[0]*i_attr[0].v0, ooHw[2]*i_attr[0].v2, t02);
         vec4 a1v02 = Hw02 * lerp(ooHw[0]*i_attr[1].v0, ooHw[2]*i_attr[1].v2, t02);
+        vec4 a2v02 = Hw02 * lerp(ooHw[0]*i_attr[2].v0, ooHw[2]*i_attr[2].v2, t02);
 
         tris[ntri] = { v0, v12, v02 };
         o_attr[ntri*ATT_COUNT + 0] = {i_attr[0].v0, a0v12, a0v02};
         o_attr[ntri*ATT_COUNT + 1] = {i_attr[1].v0, a1v12, a1v02};
+        o_attr[ntri*ATT_COUNT + 2] = {i_attr[2].v0, a2v12, a2v02};
 
         return 2;
 
@@ -1721,12 +1725,15 @@ int clip_plane(u8 flags, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[ATT_COUNT]
 
         vec4 a0v01 = Hw01 * lerp(ooHw[0]*i_attr[0].v0, ooHw[1]*i_attr[0].v1, t01);
         vec4 a1v01 = Hw01 * lerp(ooHw[0]*i_attr[1].v0, ooHw[1]*i_attr[1].v1, t01);
+        vec4 a2v01 = Hw01 * lerp(ooHw[0]*i_attr[2].v0, ooHw[1]*i_attr[2].v1, t01);
 
         vec4 a0v02 = Hw02 * lerp(ooHw[0]*i_attr[0].v0, ooHw[2]*i_attr[0].v2, t02);
         vec4 a1v02 = Hw02 * lerp(ooHw[0]*i_attr[1].v0, ooHw[2]*i_attr[1].v2, t02);
+        vec4 a2v02 = Hw02 * lerp(ooHw[0]*i_attr[2].v0, ooHw[2]*i_attr[2].v2, t02);
 
         o_attr[ntri*ATT_COUNT + 0] = {i_attr[0].v0, a0v01, a0v02};
         o_attr[ntri*ATT_COUNT + 1] = {i_attr[1].v0, a1v01, a1v02};
+        o_attr[ntri*ATT_COUNT + 2] = {i_attr[2].v0, a2v01, a2v02};
 
         return 1;
     }
@@ -1737,6 +1744,7 @@ int clip_plane(u8 flags, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[ATT_COUNT]
 // super nice doc, real joy
 // On-Line Computer Graphics Notes CLIPPING by Kenneth Joy
 // https://fabiensanglard.net/polygon_codec/clippingdocument/Clipping.pdf
+// also classic Blinn/Newell paper p245-blinn.pdf CLIPPING USING HOMOGENEOUS COORDINATES
 // TODO: rewrite my awful clip_plane according to this paper as well
 int clip_w(vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[ATT_COUNT], trivec4* tris,  trivec4* o_attr) {
 
@@ -1750,8 +1758,8 @@ int clip_w(vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[ATT_COUNT], trivec4* tri
     switch (flags) {
     case 0:
         tris[ntri] = { v0, v1, v2 };
-        o_attr[ntri*ATT_COUNT + 0] = i_attr[0];
-        o_attr[ntri*ATT_COUNT + 1] = i_attr[1];
+        for(int i=0;i<ATT_COUNT;++i)
+            o_attr[ntri*ATT_COUNT + i] = i_attr[i];
         return 1;
     case 7:
         return 0;
@@ -1762,15 +1770,15 @@ int clip_w(vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[ATT_COUNT], trivec4* tri
         flags = 4;
     case 5:
         rotate_left(v0, v1, v2);
-        rotate_left(i_attr[0].v0, i_attr[0].v1, i_attr[0].v2);
-        rotate_left(i_attr[1].v0, i_attr[1].v1, i_attr[1].v2);
+        for(int i=0;i<ATT_COUNT;++i)
+            rotate_left(i_attr[i].v0, i_attr[i].v1, i_attr[i].v2);
         break;
     case 2:
         flags = 4;
     case 3:
         rotate_right(v0, v1, v2);
-        rotate_right(i_attr[0].v0, i_attr[0].v1, i_attr[0].v2);
-        rotate_right(i_attr[1].v0, i_attr[1].v1, i_attr[1].v2);
+        for(int i=0;i<ATT_COUNT;++i)
+            rotate_right(i_attr[i].v0, i_attr[i].v1, i_attr[i].v2);
         break;
     }
 
@@ -1782,12 +1790,14 @@ int clip_w(vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[ATT_COUNT], trivec4* tri
 
         vec4 a0v12 = lerp(i_attr[0].v1, i_attr[0].v2, t12);
         vec4 a1v12 = lerp(i_attr[1].v1, i_attr[1].v2, t12);
+        vec4 a2v12 = lerp(i_attr[2].v1, i_attr[2].v2, t12);
 
         assert(!isnan(v12.x) && !isnan(v12.y) && !isnan(v12.z) && !isnan(v12.w));
 
         tris[ntri] = { v0, v1, v12 };
         o_attr[ntri*ATT_COUNT + 0] = {i_attr[0].v0, i_attr[0].v1, a0v12};
         o_attr[ntri*ATT_COUNT + 1] = {i_attr[1].v0, i_attr[1].v1, a1v12};
+        o_attr[ntri*ATT_COUNT + 2] = {i_attr[2].v0, i_attr[2].v1, a2v12};
         ntri++;
 
         const float t02 = (W - v0.w)/(v2.w - v0.w);
@@ -1796,10 +1806,12 @@ int clip_w(vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[ATT_COUNT], trivec4* tri
 
         vec4 a0v02 = lerp(i_attr[0].v0, i_attr[0].v2, t02);
         vec4 a1v02 = lerp(i_attr[1].v0, i_attr[1].v2, t02);
+        vec4 a2v02 = lerp(i_attr[2].v0, i_attr[2].v2, t02);
 
         tris[ntri] = { v0, v12, v02 };
         o_attr[ntri*ATT_COUNT + 0] = {i_attr[0].v0, a0v12, a0v02};
         o_attr[ntri*ATT_COUNT + 1] = {i_attr[1].v0, a1v12, a1v02};
+        o_attr[ntri*ATT_COUNT + 2] = {i_attr[2].v0, a2v12, a2v02};
 
         return 2;
 
@@ -1817,12 +1829,15 @@ int clip_w(vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[ATT_COUNT], trivec4* tri
 
         vec4 a0v01 = lerp(i_attr[0].v0, i_attr[0].v1, t01);
         vec4 a1v01 = lerp(i_attr[1].v0, i_attr[1].v1, t01);
+        vec4 a2v01 = lerp(i_attr[2].v0, i_attr[2].v1, t01);
 
         vec4 a0v02 = lerp(i_attr[0].v0, i_attr[0].v2, t02);
         vec4 a1v02 = lerp(i_attr[1].v0, i_attr[1].v2, t02);
+        vec4 a2v02 = lerp(i_attr[2].v0, i_attr[2].v2, t02);
 
         o_attr[ntri*ATT_COUNT + 0] = {i_attr[0].v0, a0v01, a0v02};
         o_attr[ntri*ATT_COUNT + 1] = {i_attr[1].v0, a1v01, a1v02};
+        o_attr[ntri*ATT_COUNT + 2] = {i_attr[2].v0, a2v01, a2v02};
 
         return 1;
     }
@@ -1836,7 +1851,7 @@ int clip_triangle(const u8 mask, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[AT
     u8 flags = 0;
 
     trivec4 itri[MAX_CLIP_TRI];
-    trivec4 iattr[2*MAX_CLIP_TRI];
+    trivec4 iattr[ATT_COUNT*MAX_CLIP_TRI];
     int icount = 0;
 
     trivec4 otri[MAX_CLIP_TRI];
@@ -1862,7 +1877,7 @@ int clip_triangle(const u8 mask, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[AT
             v0 = it[i].v0;
             v1 = it[i].v1;
             v2 = it[i].v2;
-            trivec4 a[ATT_COUNT] = {ia[ATT_COUNT*i + 0], ia[ATT_COUNT*i + 1] };
+            trivec4 a[ATT_COUNT] = {ia[ATT_COUNT*i + 0], ia[ATT_COUNT*i + 1], ia[ATT_COUNT*i + 2]  };
 
             assert(o_size > 2);
             ocount += clip_w(v0, v1, v2, a, ot + ocount, oa + ATT_COUNT*ocount);
@@ -1883,7 +1898,7 @@ int clip_triangle(const u8 mask, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[AT
             v0 = it[i].v0;
             v1 = it[i].v1;
             v2 = it[i].v2;
-            trivec4 a[ATT_COUNT] = {ia[ATT_COUNT*i + 0], ia[ATT_COUNT*i + 1] };
+            trivec4 a[ATT_COUNT] = {ia[ATT_COUNT*i + 0], ia[ATT_COUNT*i + 1], ia[ATT_COUNT*i + 2]  };
 
             flags = v0[0] < -v0.w ? 1 : 0;
             flags += v1[0] < -v1.w ? 2 : 0;
@@ -1905,7 +1920,7 @@ int clip_triangle(const u8 mask, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[AT
             v0 = it[i].v0;
             v1 = it[i].v1;
             v2 = it[i].v2;
-            trivec4 a[ATT_COUNT] = {ia[ATT_COUNT*i + 0], ia[ATT_COUNT*i + 1] };
+            trivec4 a[ATT_COUNT] = {ia[ATT_COUNT*i + 0], ia[ATT_COUNT*i + 1], ia[ATT_COUNT*i + 2]  };
 
             flags = v0[0] > v0.w ? 1 : 0;
             flags += v1[0] > v1.w ? 2 : 0;
@@ -1927,7 +1942,7 @@ int clip_triangle(const u8 mask, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[AT
             v0 = it[i].v0;
             v1 = it[i].v1;
             v2 = it[i].v2;
-            trivec4 a[ATT_COUNT] = {ia[ATT_COUNT*i + 0], ia[ATT_COUNT*i + 1] };
+            trivec4 a[ATT_COUNT] = {ia[ATT_COUNT*i + 0], ia[ATT_COUNT*i + 1], ia[ATT_COUNT*i + 2]  };
 
             flags = v0[1] < -v0.w ? 1 : 0;
             flags += v1[1] < -v1.w ? 2 : 0;
@@ -1949,7 +1964,7 @@ int clip_triangle(const u8 mask, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[AT
             v0 = it[i].v0;
             v1 = it[i].v1;
             v2 = it[i].v2;
-            trivec4 a[ATT_COUNT] = {ia[ATT_COUNT*i + 0], ia[ATT_COUNT*i + 1] };
+            trivec4 a[ATT_COUNT] = {ia[ATT_COUNT*i + 0], ia[ATT_COUNT*i + 1], ia[ATT_COUNT*i + 2]  };
 
             flags = v0[1] > v0.w ? 1 : 0;
             flags += v1[1] > v1.w ? 2 : 0;
@@ -1971,7 +1986,7 @@ int clip_triangle(const u8 mask, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[AT
             v0 = it[i].v0;
             v1 = it[i].v1;
             v2 = it[i].v2;
-            trivec4 a[ATT_COUNT] = {ia[ATT_COUNT*i + 0], ia[ATT_COUNT*i + 1] };
+            trivec4 a[ATT_COUNT] = {ia[ATT_COUNT*i + 0], ia[ATT_COUNT*i + 1], ia[ATT_COUNT*i + 2]  };
 
             flags = v0[2] < -v0.w ? 1 : 0;
             flags += v1[2] < -v1.w ? 2 : 0;
@@ -1993,7 +2008,7 @@ int clip_triangle(const u8 mask, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[AT
             v0 = it[i].v0;
             v1 = it[i].v1;
             v2 = it[i].v2;
-            trivec4 a[ATT_COUNT] = {ia[ATT_COUNT*i + 0], ia[ATT_COUNT*i + 1] };
+            trivec4 a[ATT_COUNT] = {ia[ATT_COUNT*i + 0], ia[ATT_COUNT*i + 1], ia[ATT_COUNT*i + 2]  };
 
             flags = v0[2] > v0.w ? 1 : 0;
             flags += v1[2] > v1.w ? 2 : 0;
@@ -2011,8 +2026,10 @@ int clip_triangle(const u8 mask, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[AT
     assert(icount <= MAX_CLIP_TRI);
     for(int ti=0;ti<icount;++ti) {
         o_tris[ti] = { it[ti].v0, it[ti].v1, it[ti].v2 };
-        o_attr[ATT_COUNT*ti + 0] = ia[ATT_COUNT*ti + 0];
-        o_attr[ATT_COUNT*ti + 1] = ia[ATT_COUNT*ti + 1];
+
+        for(int att=0;att<ATT_COUNT;++att) {
+            o_attr[ATT_COUNT*ti + att] = ia[ATT_COUNT*ti + att];
+        }
     }
 
     return icount;
