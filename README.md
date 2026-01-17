@@ -27,4 +27,11 @@ never tried, should be simple enough
 
 Test models
 -----------
-Some test models are converted from nice pack taken from [elbolilloduro.itch.io](https://elbolilloduro.itch.io/halloween)
+Some test models are converted from nice pack at [elbolilloduro.itch.io](https://elbolilloduro.itch.io/halloween) and [psionicgames.itch.io](https://psionicgames.itch.io/low-poly-space-ship-pack)
+
+Screenshots
+-----------
+[![Fighter1 model](https://github.com/alariq/soft_rast/raw/master/screenshots/fighter1-shaded.png)]
+[![Halloween scene](https://github.com/alariq/soft_rast/raw/master/screenshots/halloween-shaded.png)]
+
+More screenshots are located in the `screenshots` folder
