@@ -31,8 +31,8 @@ Some test models are converted from nice pack at [elbolilloduro.itch.io](https:/
 
 Screenshots
 -----------
-[![Fighter1 model](https://github.com/alariq/soft_rast/raw/master/screenshots/fighter1-shading.png)]
-[![Halloween scene](https://github.com/alariq/soft_rast/raw/master/screenshots/halloween-shading.png)]
-[![SpaceScene](https://github.com/alariq/soft_rast/raw/master/screenshots/fighter1.gif)]
+![Fighter1 model](https://github.com/alariq/soft_rast/raw/master/screenshots/fighter1-shading.png)
+![Halloween scene](https://github.com/alariq/soft_rast/raw/master/screenshots/halloween-shading.png)
+![SpaceScene](https://github.com/alariq/soft_rast/raw/master/screenshots/fighter1.gif)
 
 More screenshots are located in the `screenshots` folder
