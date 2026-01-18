@@ -806,7 +806,7 @@ Str alloc_concat_from_arena(StrArena& arena, Str a, Str b) {
 
     memcpy(pstr, a.data, a.len);
     memcpy(pstr + a.len, b.data, b.len);
-    pstr[a.len + a.len] = '\0';
+    pstr[a.len + b.len] = '\0';
 
     return s;
 }
