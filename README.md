@@ -27,11 +27,12 @@ never tried, should be simple enough
 
 Test models
 -----------
-Some test models are converted from nice pack at [elbolilloduro.itch.io](https://elbolilloduro.itch.io/halloween) and [psionicgames.itch.io](https://psionicgames.itch.io/low-poly-space-ship-pack)
+Some test models are converted from nice pack at [elbolilloduro.itch.io](https://elbolilloduro.itch.io/halloween), [psionicgames.itch.io](https://psionicgames.itch.io/low-poly-space-ship-pack), moon is from [craftpix.net](https://craftpix.net/freebies/free-planets-in-space-pixel-game-background-pack)
 
 Screenshots
 -----------
 [![Fighter1 model](https://github.com/alariq/soft_rast/raw/master/screenshots/fighter1-shading.png)]
 [![Halloween scene](https://github.com/alariq/soft_rast/raw/master/screenshots/halloween-shading.png)]
+[![SpaceScene](https://github.com/alariq/soft_rast/raw/master/screenshots/fighter1.gif)]
 
 More screenshots are located in the `screenshots` folder
