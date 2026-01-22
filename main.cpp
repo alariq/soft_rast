@@ -552,7 +552,7 @@ public:
         if(new_cap > capacity_ || (new_cap < capacity_ && b_shrink)) {
 
             T* new_data = (T*)malloc(elSize*new_cap);
-            if(!new_data) {
+            if(!new_data && new_cap!=0) {
                 return false;
             }
 
@@ -560,7 +560,9 @@ public:
             size_ = new_cap < size_ ? new_cap : size_;
 
             if(data_) {
-                memcpy(new_data, data_, size_*elSize);
+                if(size_) {
+                    memcpy(new_data, data_, size_*elSize);
+                }
                 free(data_);
             }
             data_ = new_data;
@@ -578,11 +580,12 @@ public:
         return data_[i];
     }
 
-    void push(T el) {
+    TSize push(T el) {
         if(size_ == capacity_) {
             resize(capacity_ == 0 ? 16 : 2*capacity_);
         }
         data_[size_++] = el;
+        return size_ - 1;
     }
 
     void remove_swap(int i) {
