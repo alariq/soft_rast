@@ -634,6 +634,16 @@ ptrdiff_t findleft(Str s, char c) {
     return i;
 }
 
+ptrdiff_t findright(Str s, char c) {
+    ptrdiff_t i=0;
+    for(i=s.len-1; i>=0; --i) {
+        if(s.data[i] == c) {
+            return i;
+        }
+    }
+    return i;
+}
+
 Str trimleft(Str s, char c) {
     for(; s.len && *s.data == c; s.data++, s.len--) {}
     return s;
@@ -654,6 +664,10 @@ Str trimright_le(Str s, char c) {
     return s;
 }
 
+Str trim_le(Str s, char c) {
+    return trimright_le(trimleft_le(s, c), c);
+}
+
 Str substr(Str s, ptrdiff_t offset) {
     ptrdiff_t off = min(offset, s.len);
     s.data += off;
@@ -668,6 +682,15 @@ bool streq(Str a, Str b) {
 Cut cut(Str s, char c) {
     Cut rv;
     ptrdiff_t i = findleft(s, c);
+    rv.b_ok = i != s.len;
+    rv.head = { s.data, i };
+    rv.tail = substr(s, i + (rv.b_ok?1:0));
+    return rv;
+}
+
+Cut cutr(Str s, char c) {
+    Cut rv;
+    ptrdiff_t i = findright(s, c);
     rv.b_ok = i != s.len;
     rv.head = { s.data, i };
     rv.tail = substr(s, i + (rv.b_ok?1:0));
