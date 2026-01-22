@@ -988,16 +988,36 @@ struct ObjModel {
     struct V {
         int v, t, n;
     };
-    BufferT<vec3> v;
-    BufferT<vec2> t;
-    BufferT<vec3> n;
+    BufferT<vec3, i32> v;
+    BufferT<vec2, i32> t;
+    BufferT<vec3, i32> n;
 
-    BufferT<V> ib;
+    BufferT<V, i32> ib;
     Str filename_;
-};
+    char* mtllib_file; // material file, material names reference it
 
-void parse_comment(ObjModel* obj, Str s) {
-}
+    struct Material {
+        vec3 Ka, Kd, Ks;
+        float Ns; // spec exponent
+        Str name;
+    };
+
+    struct Mesh {
+        i32 ib_offset, ib_count;
+        i32 mat_idx;
+    };
+
+    struct Group {
+        i32 mesh_offset, mesh_count;
+        Str name; // transient
+    };
+
+    BufferT<Material, i32> materials;
+    BufferT<Mesh, i32> meshes;
+    BufferT<Group, i32> groups;
+
+    vec3 aabb_min_, aabb_max_;
+};
 
 bool parse_float_array(Str s, float* fa, int cnt) {
 
@@ -1020,6 +1040,154 @@ bool parse_float_array(Str s, float* fa, int cnt) {
     return rv;
 }
 
+
+vec3 parse_named_vec3(ObjModel::Material* m, Str s, const char* name) {
+    vec3 f;
+    if(!parse_float_array(s, (float*)&f, 3)) {
+        char buf[128];
+        printf("Warning, failed to parse %s, material: %s\n", name, print(buf, m->name));
+    }
+    return f;
+}
+
+bool parse_mtllib(ObjModel* obj, Str s) {
+
+    char mtllib_filename[2*PATH_MAX] = {0};
+    char pathbuf[PATH_MAX] = {0};
+    char namebuf[PATH_MAX] = {0};
+
+    Cut path = cutr(obj->filename_, '/');
+    print(pathbuf, path.head);
+
+    s = trim_le(s, ' ');
+    print(namebuf, s);
+
+    sprintf(mtllib_filename, "%s/%s", pathbuf, namebuf);
+
+    printf("Mtllib: %s\n", mtllib_filename);
+
+    FILE* f = fopen(mtllib_filename, "r");
+    if(!f) return false;
+
+    fseek(f, 0, SEEK_END);
+    ptrdiff_t size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    char* arena = (char*)malloc(size);
+    ptrdiff_t num = fread(arena, size, 1, f); (void)num;
+    assert(num == 1);
+
+    obj->mtllib_file = arena;
+
+    Cut c;
+    c.tail = { arena, size };
+    c.b_ok = true;
+
+    while(c.b_ok) {
+        c = cut(c.tail, '\n');
+
+        Cut fields = cut(trimright_le(c.head, ' '), ' ');
+
+        if(streq(fields.head, { "newmtl", 6 }))  {
+            ObjModel::Material m;
+            m.name = trim_le(fields.tail, ' ');
+            obj->materials.push(m);
+        } else if(streq(fields.head, { "Ka", 2 }))  {
+            obj->materials.last().Ka = parse_named_vec3(&obj->materials.last(), fields.tail, "Ka");
+        } else if(streq(fields.head, { "Kd", 2 }))  {
+            obj->materials.last().Kd = parse_named_vec3(&obj->materials.last(), fields.tail, "Kd");
+        } else if(streq(fields.head, { "Ks", 2 }))  {
+            obj->materials.last().Ks = parse_named_vec3(&obj->materials.last(), fields.tail, "Ks");
+        }
+    }
+
+    fclose(f);
+
+    return true;
+}
+
+void obj_print_structure(ObjModel* obj) {
+
+    for(int i=0;i<obj->meshes.size();++i) {
+        const ObjModel::Mesh& m = obj->meshes[i];
+        printf("Mesh[%i] s:%d c:%d m:%d\n", i, m.ib_offset, m.ib_count, m.mat_idx);  
+    }
+
+    char buf[128];
+    for(int i=0;i<obj->groups.size();++i) {
+        const ObjModel::Group& g = obj->groups[i];
+        printf("G %s s:%d c:%d \n", print(buf, g.name), g.mesh_offset, g.mesh_count);
+    }
+
+    for(int i=0;i<obj->materials.size();++i) {
+        const ObjModel::Material& m = obj->materials[i];
+        printf("M[%d] %s\n", i, print(buf, m.name));
+        printf("\tKa: %f %f %f\n", m.Ka.x, m.Ka.y, m.Ka.z);
+        printf("\tKd: %f %f %f\n", m.Kd.x, m.Kd.y, m.Kd.z);
+        printf("\tKs: %f %f %f\n", m.Ks.x, m.Ks.y, m.Ks.z);
+    }
+
+    printf("Indices:%d Vertices:%d Normals:%d Texcoords:%d\n", 
+        obj->ib.size(), obj->v.size(), obj->t.size(), obj->n.size());
+
+}
+
+
+void finish_mesh(ObjModel* obj) {
+    if(obj->meshes.size() > 0) {
+        obj->meshes.last().ib_count = obj->ib.size() - obj->meshes.last().ib_offset;
+    }
+}
+
+void finish_group(ObjModel* obj) {
+    // finish with current
+    if(obj->groups.size() > 0) {
+        obj->groups.last().mesh_count = obj->meshes.size() - obj->groups.last().mesh_offset;
+    }
+}
+
+void parse_group(ObjModel* obj, Str s) {
+
+    finish_mesh(obj);
+
+    Cut c = cut(trimleft_le(s, ' '), ' ');
+    char buf[128];
+    printf("got group: %s\n", print(buf, c.head));
+
+    finish_group(obj);
+    // add new
+    obj->groups.push({obj->meshes.size(), 0, c.head});
+}
+
+void parse_material_ref(ObjModel* obj, Str s) {
+
+    Str name = trim_le(s, ' ');
+    i32 mat_idx = -1;
+    for(int i=0;i<obj->materials.size();++i) {
+        if(streq(obj->materials[i].name, name)) {
+            mat_idx = i;
+            break;
+        }
+    }
+
+    if(-1 == mat_idx) {
+        assert(0 && "Cannot be, possible no or failed to parse material file!");
+        ObjModel::Material m;
+        m.name = name;
+        mat_idx = obj->materials.push(m);
+    }
+
+    // material ref starts new mesh
+
+    finish_mesh(obj);
+    // add new
+    obj->meshes.push({obj->ib.size(), 0, mat_idx});
+
+}
+
+void parse_comment(ObjModel* obj, Str s) {
+}
+
 bool parse_vertex(ObjModel* obj, Str s) {
     vec3 v;
     bool rv = !parse_float_array(s, (float*)&v, 3);
@@ -1027,7 +1195,7 @@ bool parse_vertex(ObjModel* obj, Str s) {
         char buf[128];
         printf("Warning, failed to parse vertex: %s\n", print(buf, s));
     } else {
-        printf("V: %f %f %f\n", v.x, v.y, v.z);
+        //printf("V: %f %f %f\n", v.x, v.y, v.z);
     }
     obj->v.push(v);
     return rv;
@@ -1040,7 +1208,7 @@ bool parse_texcoord(ObjModel* obj, Str s) {
         char buf[128];
         printf("Warning, failed to parse texcoord: %s\n", print(buf, s));
     } else {
-        printf("T: %f %f\n", v.x, v.y);
+        //printf("T: %f %f\n", v.x, v.y);
     }
     obj->t.push(v);
     return rv;
@@ -1053,7 +1221,7 @@ bool parse_normal(ObjModel* obj, Str s) {
         char buf[128];
         printf("Warning, failed to parse normal: %s\n", print(buf, s));
     } else {
-        printf("N: %f %f %f\n", v.x, v.y, v.z);
+        //printf("N: %f %f %f\n", v.x, v.y, v.z);
     }
     obj->n.push(v);
     return rv;
@@ -1097,10 +1265,10 @@ bool parse_face(ObjModel* obj, Str s) {
 
     }
 
-    printf("F: [%d, %d, %d] [%d, %d, %d] [%d, %d, %d]\n",
-            vtn[0], vtn[1], vtn[2], 
-            vtn[3], vtn[4], vtn[5], 
-            vtn[6], vtn[7], vtn[8]);
+    //printf("F: [%d, %d, %d] [%d, %d, %d] [%d, %d, %d]\n",
+    //       vtn[0], vtn[1], vtn[2], 
+    //      vtn[3], vtn[4], vtn[5], 
+    //     vtn[6], vtn[7], vtn[8]);
 
     // 1based indexing -> 0 based
     obj->ib.push({vtn[0]-1, vtn[1]-1, vtn[2]-1});
@@ -1114,9 +1282,10 @@ bool parse_objname(ObjModel* obj, Str s) {
     return true;
 }
 
+ObjModel* parse_obj(const char* filename) {
+    printf("Loading %s\n", filename);
 
-ObjModel* parse_obj(const char* data) {
-    FILE* f = fopen(data, "r");
+    FILE* f = fopen(filename, "r");
     if(!f) return nullptr;
 
     fseek(f, 0, SEEK_END);
@@ -1129,6 +1298,9 @@ ObjModel* parse_obj(const char* data) {
 
     //char buf[128];
     ObjModel* obj = new ObjModel;
+    obj->filename_ = { filename, (ptrdiff_t)strlen(filename) };
+    obj->mtllib_file = nullptr;
+
 
     Cut c;
     c.tail = { arena, size };
@@ -1153,14 +1325,52 @@ ObjModel* parse_obj(const char* data) {
             parse_face(obj, fields.tail);
         } else if(streq(fields.head, { "o", 1 }))  {
             parse_objname(obj, fields.tail);
-        }
+        } else if(streq(fields.head, { "g", 1 }))  {
+            parse_group(obj, fields.tail);
+        } else if(streq(fields.head, { "usemtl", 6 }))  {
+            parse_material_ref(obj, fields.tail);
+        } else if(streq(fields.head, { "mtllib", 6 }))  {
+            parse_mtllib(obj, fields.tail);
+        } 
         line++;
     }
+    
+    // finish last mesh and group when reached end of the file
+    finish_mesh(obj);
+    finish_group(obj);
+
+    // if there were no materials and/or no meshes create one global for more uniformal processing
+    if(obj->materials.size() == 0) {
+        ObjModel::Material m;
+        m.Ka = m.Ks = vec3(0);
+        m.Kd = vec3(1);
+        m.name = { 0, 0 };
+        obj->materials.push(m);
+    }
+
+    if(obj->meshes.size() == 0) {
+        obj->meshes.push({0, obj->ib.size(), 0});
+    }
+
+    obj_print_structure(obj);
+
+    obj->filename_ = { 0, 0 };
 
     fclose(f);
     free(arena);
 
     return obj;
+}
+
+void destroy_obj(ObjModel* o) {
+    free(o->mtllib_file);
+    o->v.resize(0);
+    o->t.resize(0);
+    o->n.resize(0);
+    o->ib.resize(0);
+    o->materials.resize(0);
+    o->meshes.resize(0);
+    o->groups.resize(0);
 }
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -2290,9 +2500,11 @@ FColor sampleTexture(vec2 uv, Image* texture, FColor in_color) {
         assert(tu>=0 && tv>=0);
         Image::Pixel pix = texture->data[tv*texture->width + tu];
         c = FColor::fromU32(pix.asU32());
-    } else { // checker texture
+    } else if(g_b_force_checker) { // checker texture
         uv = uv*32;
         c = ((((int)uv.x)>>2)&1) ^ ((((int)uv.y)>>2)&1) ? in_color : FColor(0.5f,0.1f,0.1f,0.1f);
+    } else {
+        c = FColor(0.5f, 1, 1, 1);
     }
 
     return c;
@@ -2885,7 +3097,7 @@ void init_scene(TriBuffer& tb, TriBufferF& tbnc, VertexBuffer2D& dyn_vb, m44 mpr
 
         const Object& o = g_objects[oi];
         const ObjModel* mdl = o.model_;
-        const BufferT<ObjModel::V>& ib = mdl->ib;
+        const BufferT<ObjModel::V, i32>& ib = mdl->ib;
         int inc = g_meshes.primType == Mesh::kTri ? 3 : 1;
 
         vec3 vmin = vec3(FLT_MAX, FLT_MAX, FLT_MAX);
@@ -2911,79 +3123,92 @@ void init_scene(TriBuffer& tb, TriBufferF& tbnc, VertexBuffer2D& dyn_vb, m44 mpr
         //m44 rotM = rotateXZ(rot_angle_rad);
         bool b_has_normals = mdl->n.size() > 0;
 
-        for(int i=0;i<(int)ib.size(); i+=inc) {
-            const ObjModel::V i0 = ib[i+0];
-            const ObjModel::V i1 = ib[i+1];
-            const ObjModel::V i2 = ib[i+2];
 
-            vec4 v0 = vec4(mdl->v[i0.v], 1);
-            vec4 v1 = vec4(mdl->v[i1.v], 1);
-            vec4 v2 = vec4(mdl->v[i2.v], 1);
+        for(int mi = 0; mi < mdl->meshes.size(); ++mi) {
 
-            vec4 t0 = mdl->t[i0.t];
-            vec4 t1 = mdl->t[i1.t];
-            vec4 t2 = mdl->t[i2.t];
+            i32 ib_start = mdl->meshes[mi].ib_offset;
+            i32 ib_end = ib_start + mdl->meshes[mi].ib_count;
+            const ObjModel::Material& mat = mdl->materials[mdl->meshes[mi].mat_idx];
 
-            if(o.draw_flags.scroll_uv.x) {
-                t0.x = t0.x + u_offset*o.draw_flags.scroll_uv.x;
-                t1.x = t1.x + u_offset*o.draw_flags.scroll_uv.x;
-                t2.x = t2.x + u_offset*o.draw_flags.scroll_uv.x;
-            }
-            if(o.draw_flags.scroll_uv.y) {
-                t0.y = t0.y + v_offset*o.draw_flags.scroll_uv.y;
-                t1.y = t1.y + v_offset*o.draw_flags.scroll_uv.y;
-                t2.y = t2.y + v_offset*o.draw_flags.scroll_uv.y;
-            }
+            vec4 c0, c1, c2;
+            c0 = c1 = c2 = vec4(mat.Kd, 1);
 
-            vec4 n0 = b_has_normals ? vec4(mdl->n[i0.n], 0) : normalize(cross(normalize((v1 - v0).xyz()), normalize((v2 - v0).xyz())));
-            vec4 n1 = b_has_normals ? vec4(mdl->n[i1.n], 0) : normalize(cross(normalize((v1 - v0).xyz()), normalize((v2 - v0).xyz())));
-            vec4 n2 = b_has_normals ? vec4(mdl->n[i2.n], 0) : normalize(cross(normalize((v1 - v0).xyz()), normalize((v2 - v0).xyz())));
+            //for(int i=0;i<(int)ib.size(); i+=inc) {
+            for(i32 i=ib_start;i<ib_end; i+=inc) {
+                const ObjModel::V i0 = ib[i+0];
+                const ObjModel::V i1 = ib[i+1];
+                const ObjModel::V i2 = ib[i+2];
 
-            v0 = v0 * vec4(o.scale_, 1);
-            v0 = mul(rotM, v0);
-            v0 = v0 + o.pos_;
-            v1 = v1 * vec4(o.scale_, 1);
-            v1 = mul(rotM, v1);
-            v1 = v1 + o.pos_;
-            v2 = v2 * vec4(o.scale_, 1);
-            v2 = mul(rotM, v2);
-            v2 = v2 + o.pos_;
+                vec4 v0 = vec4(mdl->v[i0.v], 1);
+                vec4 v1 = vec4(mdl->v[i1.v], 1);
+                vec4 v2 = vec4(mdl->v[i2.v], 1);
 
-            //vec4 v0v = mul(mview, v0);
-            //vec4 v0p = mul(mproj, v0v);
-            vec4 v0p = mul(viewproj, v0);
-            vec4 v1p = mul(viewproj, v1);
-            vec4 v2p = mul(viewproj, v2);
+                vec4 t0 = mdl->t[i0.t];
+                vec4 t1 = mdl->t[i1.t];
+                vec4 t2 = mdl->t[i2.t];
 
-            n0 = mul(mview, mul(rotM, n0));
-            n1 = mul(mview, mul(rotM, n1));
-            n2 = mul(mview, mul(rotM, n2));
 
-            trivec4 attribs[ATT_COUNT] = {
-                { n0, n1, n2 },
-                { t0, t1, t2 },
-                { n0, n1, n2 },
-            };
-
-            if(g_b_clip) {
-                const int ntris = clip_triangle((u8)g_clip_mask, v0p, v1p, v2p, attribs, o_tri, o_attr, MAX_CLIP_TRI);
-                assert(ntris < MAX_CLIP_TRI);
-                for(int i=0;i<ntris; ++i) {
-                    tb.push(TriSetup<S>(o_tri[i].v0, o_tri[i].v1, o_tri[i].v2));
-                    for(int ai = 0; ai < ATT_COUNT; ai++) {
-                        const int att_idx = ai + ATT_COUNT*i;
-                        tb.last().set_attribs(ai, o_attr[att_idx].v0, o_attr[att_idx].v1, o_attr[att_idx].v2);  
-                    }
+                if(o.draw_flags.scroll_uv.x) {
+                    t0.x = t0.x + u_offset*o.draw_flags.scroll_uv.x;
+                    t1.x = t1.x + u_offset*o.draw_flags.scroll_uv.x;
+                    t2.x = t2.x + u_offset*o.draw_flags.scroll_uv.x;
                 }
-            } else {
-                tb.push(TriSetup<S>(v0p, v1p, v2p));
-                //tb.last().set_attribs(0, mesh_attr[i0.v%3], mesh_attr[i1.v%3], mesh_attr[i2.v%3]);  
-                tb.last().set_attribs(0, n0, n1, n2);  
-                tb.last().set_attribs(1, t0, t1, t2);  
-                tb.last().set_attribs(2, n0, n1, n2);  
-            }
+                if(o.draw_flags.scroll_uv.y) {
+                    t0.y = t0.y + v_offset*o.draw_flags.scroll_uv.y;
+                    t1.y = t1.y + v_offset*o.draw_flags.scroll_uv.y;
+                    t2.y = t2.y + v_offset*o.draw_flags.scroll_uv.y;
+                }
 
-            tbnc.push(TriSetup<float>(v0p, v1p, v2p));
+                vec4 n0 = b_has_normals ? vec4(mdl->n[i0.n], 0) : normalize(cross(normalize((v1 - v0).xyz()), normalize((v2 - v0).xyz())));
+                vec4 n1 = b_has_normals ? vec4(mdl->n[i1.n], 0) : normalize(cross(normalize((v1 - v0).xyz()), normalize((v2 - v0).xyz())));
+                vec4 n2 = b_has_normals ? vec4(mdl->n[i2.n], 0) : normalize(cross(normalize((v1 - v0).xyz()), normalize((v2 - v0).xyz())));
+
+                v0 = v0 * vec4(o.scale_, 1);
+                v0 = mul(rotM, v0);
+                v0 = v0 + o.pos_;
+                v1 = v1 * vec4(o.scale_, 1);
+                v1 = mul(rotM, v1);
+                v1 = v1 + o.pos_;
+                v2 = v2 * vec4(o.scale_, 1);
+                v2 = mul(rotM, v2);
+                v2 = v2 + o.pos_;
+
+                //vec4 v0v = mul(mview, v0);
+                //vec4 v0p = mul(mproj, v0v);
+                vec4 v0p = mul(viewproj, v0);
+                vec4 v1p = mul(viewproj, v1);
+                vec4 v2p = mul(viewproj, v2);
+
+                n0 = mul(mview, mul(rotM, n0));
+                n1 = mul(mview, mul(rotM, n1));
+                n2 = mul(mview, mul(rotM, n2));
+
+                trivec4 attribs[ATT_COUNT] = {
+                    { c0, c1, c2 },
+                    { t0, t1, t2 },
+                    { n0, n1, n2 },
+                };
+
+                if(g_b_clip) {
+                    const int ntris = clip_triangle((u8)g_clip_mask, v0p, v1p, v2p, attribs, o_tri, o_attr, MAX_CLIP_TRI);
+                    assert(ntris < MAX_CLIP_TRI);
+                    for(int i=0;i<ntris; ++i) {
+                        tb.push(TriSetup<S>(o_tri[i].v0, o_tri[i].v1, o_tri[i].v2));
+                        for(int ai = 0; ai < ATT_COUNT; ai++) {
+                            const int att_idx = ai + ATT_COUNT*i;
+                            tb.last().set_attribs(ai, o_attr[att_idx].v0, o_attr[att_idx].v1, o_attr[att_idx].v2);  
+                        }
+                    }
+                } else {
+                    tb.push(TriSetup<S>(v0p, v1p, v2p));
+                    //tb.last().set_attribs(0, mesh_attr[i0.v%3], mesh_attr[i1.v%3], mesh_attr[i2.v%3]);  
+                    tb.last().set_attribs(0, c0, c1, c2);  
+                    tb.last().set_attribs(1, t0, t1, t2);  
+                    tb.last().set_attribs(2, n0, n1, n2);  
+                }
+
+                tbnc.push(TriSetup<float>(v0p, v1p, v2p));
+            }
         }
 
         g_draw_calls.push(DrawCallInfo{o.texture_, obj_model_start_tri, (int)tb.size() - obj_model_start_tri, false});
@@ -3156,6 +3381,12 @@ bool load_resources() {
     }
 
     return true;
+}
+
+void destroy_resources() {
+    for(int i=0;i<g_models.size();++i) {
+        destroy_obj(g_models[i].model);
+    }
 }
 
 struct { 
@@ -4643,6 +4874,8 @@ void draw_traversal_debugger_ui() {
 
 void on_exit() {
     delete g_obj;
+
+    destroy_resources();
 
     free(g_string_arena.mem);
     g_string_arena.capacity = 0;
