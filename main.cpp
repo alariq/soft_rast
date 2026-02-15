@@ -2404,7 +2404,7 @@ int clip_triangle(const u8 mask, vec4 v0, vec4 v1, vec4 v2, trivec4(& i_attr)[AT
         swap(icount, ocount);
     }
 
-    // -z
+    // +z
     if(mask&0x20) {
         ocount = 0;
         for(int i=0;i<icount;++i) {
@@ -3694,7 +3694,6 @@ void traverse_aabb(const float sample_offset, TriSetup<S>* tris, int count) {
             continue;
         }
 
-
         const TriSetup<S>& ts = tris[i];
 
         // small thin tris, could give incorrect area
@@ -3762,7 +3761,7 @@ void traverse_aabb(const float sample_offset, TriSetup<S>* tris, int count) {
             for (i32 x = 0; x <= Width; x++) {
 
                 Pt<S> p(o.x + toFixed(x), o.y + toFixed(y));
-            
+
                 if(!g_b_delta_update) {
                     e0 = ts.e0<FpPrec>(p);
                     e1 = ts.e1<FpPrec>(p);
@@ -4127,6 +4126,8 @@ void on_update() {
 
     g_stats.begin();
 
+    bool b_blend_saved = g_b_blend;
+
     for(int i = 0; i < (int)g_draw_calls.size(); ++i) {
         const DrawCallInfo& dc = g_draw_calls[i];
 
@@ -4138,6 +4139,8 @@ void on_update() {
             continue;
         }
 
+        g_b_blend = dc.b_blend ? true : g_b_blend;
+
         setTexture(dc.texture);
         switch(g_traverse_type) {
             case kTraverseAABB:
@@ -4148,6 +4151,8 @@ void on_update() {
                 break;
         }
     }
+
+    g_b_blend = b_blend_saved;
 
     g_stats.end();
 
