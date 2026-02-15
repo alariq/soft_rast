@@ -2688,7 +2688,7 @@ void renderPixel(int x, int y, float u, float v, float w, const TriSetup<FP16>& 
         src = FColor(l.x*ndotl, l.y*ndotl, l.z*ndotl, color.w);
     } else { // if(g_shading_view_mode == eShadingViewMode::kShader) {
         vec4 tex = sampleTexture(texcoord.xy(), g_current_texture, in_color).toVec4();
-        vec4 c = tex * l * g_light_strength * ndotl + g_ambient;
+        vec4 c = color * tex * l * g_light_strength * ndotl + g_ambient;
         c = vec4(gamma(c.xyz(), g_gamma), c.w);
         src = FColor(c.w, c.z, c.y, c.x);
     }
