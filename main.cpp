@@ -3563,7 +3563,7 @@ void traverse_aabb(const float sample_offset, TriSetup<S>* tris, int count) {
 
         g_traverse_dgb_ctx.init();
 
-        const bool b_is_active_tri = g_active_triangle <= (int)g_tris.size() && g_active_triangle >= 0 && &g_tris[g_active_triangle] == tris + i;
+        const bool b_is_active_tri = g_active_triangle < (int)g_tris.size() && g_active_triangle >= 0 && &g_tris[g_active_triangle] == tris + i;
         if(g_b_draw_only_active_tri && !b_is_active_tri) {
             continue;
         }
