@@ -1558,7 +1558,7 @@ Image* g_current_texture = nullptr;
 #define CULL_FACE_NONE 0
 #define CULL_FACE_CW 1
 #define CULL_FACE_CCW 2
-u8 g_cull_face = CULL_FACE_NONE; // 0 - none, true; // false by default?
+u8 g_cull_face = CULL_FACE_CCW;
 
 bool do_exit = false;
 
@@ -2468,32 +2468,33 @@ bool g_b_draw_z_buf = false;
 bool g_b_draw_degenerate_tris = true;
 bool g_b_persp_corr = true;
 bool g_b_persp_corr_2nd_way = false;
-bool g_b_blend = true;
-bool g_b_clip = false;
+bool g_b_blend = false;
+bool g_b_clip = true;
 bool g_b_no_overdraw = true;
 bool g_b_delta_update = true;
 bool g_b_animate = false;
-bool g_b_draw_grid = true;
-bool g_b_draw_wireframe = true;
+bool g_b_draw_grid = false;
+bool g_b_draw_wireframe = false;
 bool g_b_draw_only_active_tri = false;
 bool g_b_force_checker = false;
 bool g_b_uv_override = false;
 
-bool g_b_depth_write_enable = false;
-bool g_b_depth_test_enable = false;
+bool g_b_depth_write_enable = true;
+bool g_b_depth_test_enable = true;
 int g_num_z_fail = 0;
+
 
 vec3 g_light_dir = vec3(0.14f, -0.95f, -0.27f);
 vec3 g_light_colour = vec3(1);
 float g_light_strength = 1.35f;
 vec3 g_ambient = vec3(0.078f);
-float g_wrapped_diffuse_k = 0.1f;
+float g_wrapped_diffuse_k = 0.9f;
 float g_gamma = 1;
 
 bool g_b_recording = false;
 
 eTraverseType g_traverse_type = kTraverseAABB;
-int g_shading_view_mode = eShadingViewMode::kColor;
+int g_shading_view_mode = eShadingViewMode::kShader;
 u8 g_alpha = 0x55;
 int g_clip_mask = 0xff; // -x, +x, -y, +y, -z, +z
 u32 g_clear_color;
