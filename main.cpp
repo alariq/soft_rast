@@ -364,6 +364,14 @@ m44 rotateXZ(const float angle_rad) {
     return m;
 }
 
+m44 get_rotation(m44 m) {
+    m.r[0][3] = 0;
+    m.r[1][3] = 0;
+    m.r[2][3] = 0;
+    m.r[3][3] = 1.0f;
+    return m;
+}
+
 // rotate about X, pitch - rotate about Y, yaw - rotate about Z
 m44 rotateXYZ(float roll, float pitch, float yaw) {
 
@@ -452,6 +460,15 @@ m44 view_invert(const m44& v) {
     return t;
 }
 
+vec3 view_get_world_pos(const m44& v) {
+    vec3 wpos;
+    vec3 tr = v.col(3).xyz();
+    wpos.x = -dot(v.col(0).xyz(), tr);
+    wpos.y = -dot(v.col(1).xyz(), tr);
+    wpos.z = -dot(v.col(2).xyz(), tr);
+    return wpos;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 m44 make_lookat(const vec3& eye, const vec3& target, const vec3& up_dir)
 {
@@ -528,7 +545,77 @@ float fbm (vec2 st) {
     return value;
 }
 
+// sohgho.ca: https://www.songho.ca/opengl/files/trackball.c
 
+//  Given an axis and angle, compute quaternion.
+vec4 axis_to_quat(const vec3 a, float phi) {
+    float s,c;
+    sincosf(phi/2.0f, &s, &c);
+    vec3 t = normalize(a);
+    return vec4(s * t.x, s * t.y, s * t.z, c);
+}
+
+/*
+ * Project an x,y pair onto a sphere of radius r OR a hyperbolic sheet
+ * if we are away from the center of the sphere.
+ */
+float tb_project_to_sphere(float r, float x, float y) {
+    float t, z;
+
+    const float d = sqrtf(x*x + y*y);
+    if (d < r * 0.70710678118654752440) {    /* Inside sphere */
+        z = sqrtf(r*r - d*d);
+    } else {           /* On hyperbola */
+        t = r / 1.41421356237309504880f;
+        z = t*t / d;
+    }
+    return z;
+}
+/*
+ * This size should really be based on the distance from the center of
+ * rotation to the point on the object underneath the mouse.  That
+ * point would then track the mouse as closely as possible.  This is a
+ * simple example, though, so that is left as an Exercise for the
+ * Programmer.
+ */
+#define TRACKBALLSIZE  (0.8f)
+/*
+ * Ok, simulate a track-ball.  Project the points onto the virtual
+ * trackball, then figure out the axis of rotation, which is the cross
+ * product of P1 P2 and O P1 (O is the center of the ball, 0,0,0)
+ * Note:  This is a deformed trackball-- is a trackball in the center,
+ * but is deformed into a hyperbolic sheet of rotation away from the
+ * center.  This particular function was chosen after trying out
+ * several variations.
+ *
+ * It is assumed that the arguments to this routine are in the range
+ * (-1.0 ... 1.0)
+ */
+vec4 trackball(float p1x, float p1y, float p2x, float p2y) {
+
+    if (p1x == p2x && p1y == p2y) {
+        return vec4(0,0,0,1); // zero rotation
+    }
+
+    //figure out z-coordinates for projection of P1 and P2 to
+    // deformed sphere
+    vec3 p1 = vec3(p1x,p1y,tb_project_to_sphere(TRACKBALLSIZE,p1x,p1y));
+    vec3 p2 = vec3(p2x,p2y,tb_project_to_sphere(TRACKBALLSIZE,p2x,p2y));
+
+    // Now, we want the cross product of P1 and P2
+    vec3 axis = cross(p2,p1);
+
+    // Figure out how much to rotate around that axis.
+    float t = len(p1 - p2) / (2.0*TRACKBALLSIZE);
+
+    // Avoid problems with out-of-control values...
+    if (t > 1.0) t = 1.0f;
+    if (t < -1.0) t = -1.0f;
+    const float phi = 2.0f * asin(t);
+
+    return axis_to_quat(axis, phi);
+
+}
 
 typedef short FP16; // 8.8
 
@@ -2392,6 +2479,7 @@ int g_clip_mask = 0xff; // -x, +x, -y, +y, -z, +z
 u32 g_clear_color;
 u32 g_tri_color;
 u32 g_outline_color;
+float g_prev_sel_pix_x = 0, g_prev_sel_pix_y = 0;
 float g_sel_pix_x = 0, g_sel_pix_y = 0;
 int g_active_triangle = 0;
 vec4 g_uvw_under_cursor;
@@ -2756,10 +2844,27 @@ struct Frustum {
     float aspect_w_by_h;
     float near, far;
 };
+struct Camera {
+    vec3 eye;
+    vec3 target;
+    vec3 up;
+    bool b_is_trackball; //
+
+    m44 trackball_prev_rot;
+    m44 trackball_cur_rot;
+    vec4 trackball_center;
+    float trackball_radius;
+    bool b_update_trackball;
+    bool b_is_update_trackball_once; 
+    //
+    //float yaw, pitch, roll;//?
+};
 const Projection g_proj_params_def = {0, 1, 1, 0, 0.5f, 10};
+const Camera g_cam_def = {vec3(0, 0, 0), vec3(0, 0, -1), vec3(0,1,0), false, m44::identity(), m44::identity(), vec4(0,0,0,1), 2.5f, false, false };
 Projection g_proj_params = g_proj_params_def;
 const Frustum g_frustum_def = { 90.0f, (float)g_tex_w/g_tex_h, g_proj_params_def.near, g_proj_params_def.far};
 Frustum g_frustum = g_frustum_def;
+Camera g_cam = g_cam_def;
 m44 g_mproj = m44::identity();
 m44 g_mview = m44::identity();
 
@@ -3943,6 +4048,29 @@ void on_update() {
 
     memset(map0, 0, g_tex_w*g_tex_h);
     memset(map1, 0, g_tex_w*g_tex_h);
+
+    if(g_cam.b_is_trackball) {
+        if(g_cam.b_update_trackball || g_cam.b_is_update_trackball_once) { // ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
+            const float aspect = g_tex_w / (float)g_tex_h;
+            const float oo_scale = 2.0f/min(g_tex_w, g_tex_h);
+            const vec2 pp = oo_scale * vec2(g_prev_sel_pix_x, g_prev_sel_pix_y) - vec2(aspect, 1) ;
+            const vec2 p = oo_scale * vec2(g_sel_pix_x, g_sel_pix_y) - vec2(aspect, 1);
+            //printf("prev: %.2f %.2f - cur: %.2f %.2f dpos: %.3f\n", pp.x, pp.y, p.x, p.y, len(pp - p));
+
+            vec4 q = trackball(pp.x, -pp.y, p.x, -p.y);
+            m44 delta = g_cam.b_is_update_trackball_once ? m44::identity() : mat_from_quat(q);
+            g_cam.trackball_cur_rot = mul(delta, g_cam.trackball_prev_rot);
+            // translate target to zero, rotate, translate back for eye distance
+            vec3 eye = vec3(0,0, -g_cam.trackball_radius);
+            m44 t = mul(translation(eye), g_cam.trackball_cur_rot);
+            g_mview = mul(t, translation(-1.0f*g_cam.target));
+            g_cam.b_is_update_trackball_once = false;
+            g_cam.eye = view_get_world_pos(g_mview); // update eye to not jump too much when we switch back to non-trackball mode (we are using up(0,1,0), so view will rotate anyway
+        }
+    } else {
+        g_mview = make_lookat(g_cam.eye, g_cam.target, vec3(0, 1, 0));
+    }
+
 #if 0
     g_mproj = make_proj(g_proj_params.left, g_proj_params.right, 
             g_proj_params.top, g_proj_params.bottom, 
@@ -4074,7 +4202,6 @@ void on_update() {
     const ImVec2 wPos = ImGui::GetWindowPos();
     ImGui::Text("Content min:%f,%f max:%f,%f\n", vMin.x, vMin.y, vMax.x, vMax.y);
 
-
     const int inc = 1<<g_scale_idx;
     ImDrawList* dl = ImGui::GetWindowDrawList(); // ImGui::GetForegroundDrawList()
                                                  //
@@ -4085,10 +4212,10 @@ void on_update() {
         // convert to pixel
         g_sel_pix_x = (mousePos.x - pmin.x)/inc;
         g_sel_pix_y = (mousePos.y - pmin.y)/inc;
-    } else {
-        g_sel_pix_x = -1;
-        g_sel_pix_y = -1;
     }
+    g_sel_pix_x = clamp(g_sel_pix_x, 0.0f, g_tex_w-1.0f);
+    g_sel_pix_y = clamp(g_sel_pix_y, 0.0f, g_tex_h-1.0f);
+
 
     // grid
     if(g_b_draw_grid && inc > 1) {
@@ -4168,6 +4295,17 @@ void on_update() {
             }
         } else if(ImGui::IsKeyDown(ImGuiKey_ModCtrl) && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             g_tri_adder.add_point(g_sel_pix_x, g_sel_pix_y, WorkingPoints::kTris);
+        }
+
+        if(ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+            g_prev_sel_pix_x = g_sel_pix_x;
+            g_prev_sel_pix_y = g_sel_pix_y;
+            g_cam.b_update_trackball = true;
+        } else if(ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
+            g_cam.b_update_trackball = false;
+            g_cam.trackball_prev_rot = g_cam.trackball_cur_rot;
+        } else if(io.MouseWheel) {
+            g_cam.trackball_radius = clamp(g_cam.trackball_radius + io.MouseWheel, 0.1f, 10.0f);
         }
     }
 
@@ -4388,6 +4526,30 @@ void on_update() {
         
                 }
 
+                ImGui::SeparatorText("Camera:");
+
+                ImGui::BeginDisabled(g_cam.b_is_trackball);
+                if(ImGui::DragFloat3("Eye", (float*)&g_cam.eye.x, 0.01f, -10.0f, 10.0f)) {
+                    if(len(g_cam.eye - g_cam.target) < 0.001f) {
+                        g_cam.target = g_cam.eye + vec3(0,0,-1);
+                    }
+                }
+                ImGui::EndDisabled();
+                ImGui::DragFloat3("Target", (float*)&g_cam.target.x, 0.01f, -10.0f, 10.0f);
+                if(ImGui::DragFloat("Trackball Radius", &g_cam.trackball_radius, 0.01f, 0.1f, 10.0f)) {
+                    g_cam.b_is_update_trackball_once = true;
+                }
+                if(ImGui::Checkbox("Trackball", &g_cam.b_is_trackball)) {
+                    if(g_cam.b_is_trackball) {
+                        g_cam.trackball_radius = len(g_cam.target - g_cam.eye);
+                        g_cam.trackball_prev_rot = m44::identity();
+                        g_cam.trackball_cur_rot = get_rotation(g_mview);
+                    }
+                }
+                if(ImGui::Button("Reset##reset_camera")) {
+                    g_cam = g_cam_def;
+                }
+
                 ImGui::SeparatorText("Proj matrix:");
                 if (ImGui::BeginTable("Proj", 4))
                 {
@@ -4396,6 +4558,18 @@ void on_update() {
                         for(int x=0;x<4;++x) {
                             ImGui::TableSetColumnIndex(x);
                             ImGui::Text("%.4f", g_mproj.m[y*4 + x]);
+                        }
+                    }
+                    ImGui::EndTable();
+                }
+                ImGui::SeparatorText("View matrix:");
+                if (ImGui::BeginTable("View", 4))
+                {
+                    for(int y=0;y<4;++y) {
+                        ImGui::TableNextRow();
+                        for(int x=0;x<4;++x) {
+                            ImGui::TableSetColumnIndex(x);
+                            ImGui::Text("%.4f", g_mview.m[y*4 + x]);
                         }
                     }
                     ImGui::EndTable();
