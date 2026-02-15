@@ -1504,6 +1504,24 @@ void destroy_dir_list(DirList& dl) {
     destroy_str_arena(dl.arena);
 }
 
+void write_ppm(FILE* f, u32* data, int w, int h) {
+    if(!f)
+        return;
+
+    fprintf(f, "P3\n%d %d\n255\n", w, h);
+    for(int y=0;y<h;++y) {
+        for(int x=0;x<w;++x) {
+            u32 pix = data[y*w + x];
+            u32 b = pix & 0xFF;
+            u32 g = (pix >> 8) & 0xFF;
+            u32 r = (pix >> 16) & 0xFF;
+            fprintf(f, "%d %d %d ", r, g, b);
+        }
+        fprintf(f, "\n");
+    }
+    fprintf(f, "\n");
+}
+
 //#define Integer 12
 //#define Fractional 4 
 #define MAX_FP 0x7FFF
@@ -2471,6 +2489,8 @@ float g_light_strength = 1.35f;
 vec3 g_ambient = vec3(0.078f);
 float g_wrapped_diffuse_k = 0.1f;
 float g_gamma = 1;
+
+bool g_b_recording = false;
 
 eTraverseType g_traverse_type = kTraverseAABB;
 int g_shading_view_mode = eShadingViewMode::kColor;
@@ -4194,6 +4214,20 @@ void on_update() {
                 }
             });
     }
+
+    static int frame_idx = 0;
+    if(g_b_recording) {
+        char filename[32];
+        sprintf(filename,"./rec/frame%04d.ppm", frame_idx++); 
+        if(FILE* f = fopen(filename, "w")) {
+            write_ppm(f, g_fb, g_tex_w, g_tex_h);
+            fclose(f);
+        }
+    } else {
+        frame_idx = 0;
+    }
+
+
     int scale = 1 << g_scale_idx;
     ImGui::Image((ImTextureID)(intptr_t)DT_GetTextureID(g_dyn_texture), ImVec2(scale*g_tex_w, scale*g_tex_h));
 
@@ -4620,6 +4654,11 @@ void on_update() {
                 fclose(fp);
             }
         }
+
+        if(ImGui::Button("Record")) {
+            g_b_recording = !g_b_recording;
+        }
+
 
         ImGui::SameLine();
 
